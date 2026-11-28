@@ -1,79 +1,168 @@
 'use client'
 
+import { BedrijfSchakelaar } from './bedrijf-schakelaar'
+import type { BedrijfFilter } from '@/lib/bedrijven/model'
+import { PersoonFoto } from '@/components/admin/persoon-foto'
+
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import {
-  LayoutDashboard,
-  Users,
-  FileText,
-  UserSquare2,
-  ArrowLeftRight,
-  TrendingUp,
-  LogOut,
-  ChevronDown,
-  Globe,
-  Calendar,
-  Briefcase,
-  RefreshCcw,
+  LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
+  LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
+  Info, Camera, ClipboardList, BookOpen, Wrench, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
+  MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, Video, Inbox, Clapperboard, Building2, FileSignature, ScrollText, Wallet, PackageCheck, Aperture,
+  Target, LineChart, CalendarRange,
 } from 'lucide-react'
-import { useState, useTransition } from 'react'
+import { canSeeModule } from '@/lib/staff'
+import { DISABLED_MODULE_KEYS } from '@/lib/features'
+import { OpslagMeter } from './opslag-meter'
+import { moduleBeschikbaar, MODULE_DASHBOARD_KEY, type AlleInstellingen, type Rol } from '@/lib/instellingen/model'
+import { useEffect, useState } from 'react'
+import { useRefresh } from '@/lib/use-refresh'
+import { Woordmerk } from '@/components/logo'
 
-const NAV = [
+type NavChild = { label: string; href: string; icon: React.ElementType; exact?: boolean }
+type NavEntry = {
+  label: string
+  href: string
+  icon: React.ElementType
+  exact?: boolean
+  module?: string
+  /** Tweede module die het item ook zichtbaar maakt (gedeelde pagina, zie lib/staff.ts). */
+  ookModule?: string
+  adminOnly?: boolean
+  children?: NavChild[]
+  /** Sleutel uit /api/admin/badges: toont een rood telbolletje. */
+  badge?: string
+}
+/** `open`: standaard opengeklapt (de dagelijkse secties). De andere klap je open met een klik; de keuze wordt onthouden. */
+type NavSection = { title?: string; items: NavEntry[]; open?: boolean }
+
+// Gegroepeerd per thema zodat de zijbalk overzichtelijk blijft. Volgorde binnen
+// een sectie = werkvolgorde. Gating (module/adminOnly) blijft per item behouden.
+const SECTIONS: NavSection[] = [
   {
-    label: 'Command Center',
-    href: '/admin',
-    icon: LayoutDashboard,
-    exact: true,
-  },
-  {
-    label: 'Klanten',
-    href: '/admin/clients',
-    icon: Users,
-  },
-  {
-    label: 'Contracten',
-    href: '/admin/contracts',
-    icon: FileText,
-  },
-  {
-    label: 'Diensten',
-    href: '/admin/services',
-    icon: Briefcase,
-    children: [
-      { label: 'Social Media', href: '/admin/services/social-media', icon: Calendar },
-      { label: 'Website', href: '/admin/services/website', icon: Globe },
+    // Elke dag: het overzicht, de agenda en de meetings samen.
+    items: [
+      { label: 'Command Center', href: '/admin', icon: LayoutDashboard, exact: true },
+      { label: 'Agenda', href: '/admin/agenda', icon: CalendarRange, module: 'agenda' },
+      { label: 'Meeting Inplanner', href: '/admin/meetings', icon: Video, module: 'meetings', ookModule: 'sales' },
     ],
   },
   {
-    label: 'Partners',
-    href: '/admin/partners',
-    icon: UserSquare2,
+    // Algemeen, voor beide bedrijven: klanten, projecten en alles wat getekend wordt.
+    title: 'Klanten & legal',
+    open: true,
+    items: [
+      { label: 'Klanten',     href: '/admin/clients',    icon: Users, module: 'clients' },
+      // Eén overzicht voor leads en projecten (vervangt de vroegere pipeline).
+      { label: 'Projecten',   href: '/admin/opdrachten', icon: KanbanSquare, module: 'opdrachten' },
+      { label: 'Aanvragen',   href: '/admin/aanvragen',  icon: Inbox, module: 'aanvragen' },
+      { label: 'Offertes',    href: '/admin/offertes',   icon: FileSignature, module: 'offertes' },
+      { label: 'Klantcontracten',  href: '/admin/contracts',  icon: FileText, module: 'contracts' },
+      // Eigen contracten van NextGenMedia (huur, verzekeringen, NDA's …) met e-sign; enkel zaakvoerders.
+      { label: 'Algemene contracten', href: '/admin/algemene-contracten', icon: ScrollText, module: 'algemene_contracten', adminOnly: true },
+    ],
   },
   {
-    label: 'Opdrachten',
-    href: '/admin/assignments',
-    icon: Briefcase,
+    // Het werk van NextGenMedia: plannen, maken en opleveren.
+    title: 'NextGenMedia',
+    open: true,
+    items: [
+      { label: 'Planning Media', href: '/admin/contentplanning', icon: CalendarDays, module: 'info' },
+      // De contentkalenders per klant (ingeplande posts, feedback van de klant).
+      { label: 'Social media', href: '/admin/services/social-media', icon: Calendar, module: 'content' },
+      // Shoots: kalender, plan per uur en locatie, briefing en mail met het plan.
+      { label: 'Shoot planner', href: '/admin/shoots', icon: Aperture, module: 'shoots' },
+      { label: 'Opleveringen', href: '/admin/opleveringen', icon: PackageCheck, module: 'opleveringen' },
+      { label: 'Metricool', href: '/admin/metricool', icon: CalendarClock, module: 'metricool', exact: true },
+      // Enkel nog onderhoud: wanneer start en loopt elk onderhoudscontract af.
+      { label: 'Website-onderhoud', href: '/admin/services/website', icon: Globe, module: 'content' },
+      {
+        label: 'Blogs', href: '/admin/blog-calendar', icon: Newspaper, module: 'blogs',
+        children: [
+          { label: 'Projecten', href: '/admin/blogaccounts',  icon: Newspaper },
+          { label: 'Kalender',  href: '/admin/blog-calendar', icon: CalendarDays },
+        ],
+      },
+      { label: 'Klantuploads', href: '/admin/uploads', icon: FolderUp, module: 'uploads' },
+      { label: 'Formulieren', href: '/admin/formulieren', icon: ClipboardPen, module: 'formulieren' },
+      { label: 'Materiaalbeheer', href: '/admin/materiaal', icon: Camera, module: 'materiaal' },
+    ],
   },
   {
-    label: 'Settlements',
-    href: '/admin/settlements',
-    icon: ArrowLeftRight,
+    // Eigen omgeving van NextGenSolutions: pipeline en cijfers, los van de rest.
+    title: 'NextGenSolutions',
+    open: true,
+    items: [
+      { label: 'Pipeline', href: '/admin/nextgensolutions', icon: Target, module: 'nextgensolutions', exact: true },
+      { label: 'Levering', href: '/admin/nextgensolutions/levering', icon: Wrench, module: 'ngs_levering', ookModule: 'nextgensolutions' },
+      { label: 'Cijfers', href: '/admin/nextgensolutions/cijfers', icon: LineChart, module: 'nextgensolutions' },
+    ],
   },
   {
-    label: 'Omzet',
-    href: '/admin/revenue',
-    icon: TrendingUp,
+    // Facturatie en geld: facturen, cijfers, aankopen, vesting en de vennoten.
+    title: 'Financieel',
+    items: [
+      { label: 'Facturen', href: '/admin/invoices',      icon: Receipt, module: 'invoices' },
+      { label: 'Financiën', href: '/admin/revenue/omzet', icon: TrendingUp, module: 'finance' },
+      { label: 'Omzetrapportage', href: '/admin/revenue/rapportage', icon: BarChart3, module: 'finance' },
+      { label: 'Aankopen', href: '/admin/purchases',     icon: ShoppingCart, module: 'purchases' },
+      { label: 'Vesting',  href: '/admin/vesting',       icon: Rocket, module: 'vesting' },
+      { label: 'Uitgaven vennoten', href: '/admin/vennoten', icon: Wallet, module: 'vennoten', adminOnly: true },
+    ],
+  },
+  {
+    // Wat klanten in hun app te zien krijgen.
+    title: 'Klantapp',
+    items: [
+      { label: 'Founders of Flanders', href: '/admin/founders-of-flanders', icon: Clapperboard, module: 'founders' },
+      { label: 'Onze partners', href: '/admin/onze-partners', icon: Handshake, module: 'onze_partners' },
+    ],
+  },
+  {
+    title: 'Team & partners',
+    items: [
+      // Personeel = iedereen die voor ons werkt: dossiers, planning, uren, kosten
+      // en (voor hoofdbeheerders) de logins met rollen en modules.
+      { label: 'Personeel', href: '/admin/personeel', icon: Contact, module: 'personeel', adminOnly: true },
+      { label: 'Kantoor', href: '/admin/kantoor', icon: Building2, module: 'kantoor' },
+      { label: 'Partners',    href: '/admin/partners',    icon: UserSquare2, module: 'partners' },
+      { label: 'Opdrachten partners', href: '/admin/assignments', icon: Briefcase, module: 'assignments' },
+      { label: 'Settlements', href: '/admin/settlements', icon: ArrowLeftRight, module: 'settlements' },
+    ],
+  },
+  {
+    title: 'Overig',
+    items: [
+      { label: 'E-mailcenter', href: '/admin/email', icon: Mail, module: 'email' },
+      {
+        label: 'Informatief', href: '/admin/informatief', icon: Info, module: 'info',
+        children: [
+          { label: 'Werkinstructies', href: '/admin/informatief', icon: BookOpen },
+          { label: 'Onboarding Info', href: '/admin/onboarding',   icon: ClipboardList },
+        ],
+      },
+    ],
   },
 ]
 
-function NavItem({ item, depth = 0 }: { item: typeof NAV[0]; depth?: number }) {
+function NavItem({
+  item,
+  onNavigate,
+  badge = 0,
+}: {
+  item: NavEntry
+  onNavigate: () => void
+  /** Aantal voor het rode bolletje; 0 = niets tonen. */
+  badge?: number
+}) {
   const pathname = usePathname()
   const [open, setOpen] = useState(() =>
     item.children?.some((c) => pathname.startsWith(c.href)) || pathname.startsWith(item.href)
   )
-
   const isActive = item.exact ? pathname === item.href : pathname.startsWith(item.href)
   const Icon = item.icon
 
@@ -82,10 +171,7 @@ function NavItem({ item, depth = 0 }: { item: typeof NAV[0]; depth?: number }) {
       <div>
         <button
           onClick={() => setOpen(!open)}
-          className={cn(
-            'sidebar-item w-full justify-between',
-            isActive && 'active'
-          )}
+          className={cn('sidebar-item w-full justify-between', isActive && 'active')}
         >
           <span className="flex items-center gap-3">
             <Icon className="h-4 w-4 shrink-0" />
@@ -94,15 +180,14 @@ function NavItem({ item, depth = 0 }: { item: typeof NAV[0]; depth?: number }) {
           <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-180')} />
         </button>
         {open && (
-          <div className="ml-4 mt-1 space-y-0.5 border-l border-gray-100 pl-3">
+          <div className="ml-5 mt-1 space-y-0.5 border-l border-black/[0.06] pl-2">
             {item.children.map((child) => (
               <Link
                 key={child.href}
                 href={child.href}
-                className={cn(
-                  'sidebar-item text-xs',
-                  pathname.startsWith(child.href) && 'active'
-                )}
+                prefetch={false}
+                onClick={onNavigate}
+                className={cn('sidebar-item text-xs', (child.exact ? pathname === child.href : pathname.startsWith(child.href)) && 'active')}
               >
                 <child.icon className="h-3.5 w-3.5 shrink-0" />
                 {child.label}
@@ -115,69 +200,268 @@ function NavItem({ item, depth = 0 }: { item: typeof NAV[0]; depth?: number }) {
   }
 
   return (
+    // prefetch={false} — ZONDER dit haalde de browser bij elke adminpagina
+    // ALLE 34 menu-items vooruit op. Elke adminpagina is force-dynamic en er is
+    // geen loading.tsx, dus zo'n vooruitgehaalde pagina wordt VOLLEDIG op de
+    // server gerenderd, mét al zijn databasequery's. Eén keer inloggen zette
+    // daardoor ~25 volledige paginarenders tegelijk in gang — genoeg om op het
+    // gratis Supabase-plan de middleware te laten vastlopen (MIDDLEWARE_-
+    // INVOCATION_TIMEOUT, en dan is de hele app onbereikbaar).
     <Link
       href={item.href}
+      prefetch={false}
+      onClick={onNavigate}
       className={cn('sidebar-item', isActive && 'active')}
     >
       <Icon className="h-4 w-4 shrink-0" />
-      {item.label}
+      <span className="flex-1">{item.label}</span>
+      {/* Rood telbolletje: iets is te laat en vraagt aandacht. */}
+      {badge > 0 && (
+        <span
+          title={`${badge} ${badge === 1 ? 'opdracht is' : 'opdrachten zijn'} te laat`}
+          className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </Link>
   )
 }
 
-export function AdminSidebar() {
+export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, fotoVersie = null, instellingen, rol = 'hoofdbeheerder', verborgenPersoonlijk = [], toonInstellingen = false, mijnWerk = false, bedrijfFilter = 'alles', bedrijfVast = false }: {
+  allowedModules?: string[]
+  isEmployee?: boolean
+  /** Voornaam van wie er ingelogd is — voor de begroeting bovenaan. */
+  naam?: string
+  /** Het e-mailadres eronder: het harde antwoord op "welk account is dit?". */
+  email?: string
+  /** Eigen profielfoto (Mijn account); null = initiaal. */
+  fotoVersie?: string | null
+  /** Centrale instellingen (globale zichtbaarheid + toegang per rol). Zonder = alles zoals vroeger. */
+  instellingen?: AlleInstellingen
+  rol?: Rol
+  /** Tabbladen die deze gebruiker enkel voor zichzelf verborg. */
+  verborgenPersoonlijk?: string[]
+  /** Knop "Instellingen" onderaan tonen (hoofdbeheerder, of beheerder met dat recht). */
+  toonInstellingen?: boolean
+  /** Heeft deze login een personeelsdossier? Dan staat "Mijn werk" (inklokken, planning) bovenaan. */
+  mijnWerk?: boolean
+  /** Eigen weergave Alles / Media / Solutions (verbeterplan fase 1). */
+  bedrijfFilter?: BedrijfFilter
+  /** Fase 4: enkel toegang tot één bedrijf, dan staat de weergave vast. */
+  bedrijfVast?: boolean
+} = {}) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const { refresh, spinning } = useRefresh()
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [fotoKapot, setFotoKapot] = useState(false)
+  useEffect(() => { setFotoKapot(false) }, [fotoVersie])
+  // Telbolletjes. Los van de rest opgehaald: haperen ze, dan staat het menu er
+  // gewoon zonder — een bolletje is nooit de reden om navigatie op te houden.
+  const [badges, setBadges] = useState<Record<string, number>>({})
+  // Enkel opvragen als een menu-item een bolletje kan hebben (nu geen enkel).
+  const heeftBolletjes = SECTIONS.some((sectie) => sectie.items.some((it) => !!it.badge))
+  useEffect(() => {
+    if (!heeftBolletjes) return
+    let levend = true
+    fetch('/api/admin/badges')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (levend && j) setBadges(j) })
+      .catch(() => { /* stil */ })
+    return () => { levend = false }
+  }, [heeftBolletjes])
+
+  // Werknemer ziet enkel toegestane modules; admin (allowedModules undefined) ziet alles.
+  const padNu = usePathname() ?? ''
+  const canSee = (item: NavEntry): boolean => {
+    if (item.ookModule) return canSee({ ...item, ookModule: undefined }) || canSee({ ...item, module: item.ookModule, ookModule: undefined })
+    // Uitgeschakelde features (lib/features.ts) tonen we voor niemand — ook niet
+    // voor admin; de middleware blokkeert die paden sowieso.
+    if (item.module && DISABLED_MODULE_KEYS.includes(item.module)) return false
+    if (item.adminOnly && isEmployee) return false
+    // Centrale instellingen: globaal verborgen wint van alles; daarna toegang
+    // per rol; daarna de persoonlijke keuze van de gebruiker zelf.
+    const sleutel = item.module ?? (item.href === '/admin' ? MODULE_DASHBOARD_KEY : item.href === '/admin/werknemers' ? 'werknemers' : null)
+    if (instellingen && sleutel && !moduleBeschikbaar(instellingen, { rol, modules: allowedModules ?? null }, sleutel)) return false
+    if (sleutel && verborgenPersoonlijk.includes(sleutel)) return false
+    if (!item.module || !allowedModules) return true
+    return canSeeModule(allowedModules, item.module)
+  }
+  // Volgorde uit Instellingen → Tabbladen (standaard = de volgorde hieronder).
+  const volgordeVan = (item: NavEntry): number => {
+    const k = item.module ?? (item.href === '/admin' ? MODULE_DASHBOARD_KEY : item.href === '/admin/werknemers' ? 'werknemers' : null)
+    const v = k ? instellingen?.modules[k]?.volgorde : undefined
+    return typeof v === 'number' ? v : Number.MAX_SAFE_INTEGER
+  }
+  const visibleSections = SECTIONS
+    .map((s) => ({
+      title: s.title,
+      open: s.open ?? false,
+      items: s.items.filter(canSee).map((it, i) => [it, i] as const).sort((a, b) => (volgordeVan(a[0]) - volgordeVan(b[0])) || (a[1] - b[1])).map(([it]) => it),
+    }))
+    .filter((s) => s.items.length > 0)
 
   const handleLogout = async () => {
     const supabase = createClient()
+    // Ook de verificatie-cookie wissen, zodat opnieuw inloggen weer een code vraagt.
+    try { await fetch('/api/auth/2fa/logout', { method: 'POST' }) } catch { }
     await supabase.auth.signOut()
     router.replace('/login')
   }
 
-  const handleRefresh = () => {
-    startTransition(() => { router.refresh() })
+  const closeMobile = () => setMobileOpen(false)
+
+  // In- en uitgeklapte secties: standaard enkel de dagelijkse; de sectie van de huidige pagina staat altijd open.
+  const [sectieKeuze, setSectieKeuze] = useState<Record<string, boolean>>({})
+  useEffect(() => {
+    try { const v = JSON.parse(localStorage.getItem('ngm-zijbalk-secties') ?? '{}'); if (v && typeof v === 'object') setSectieKeuze(v) } catch { /* geen opslag */ }
+  }, [])
+  const isHier = (item: NavEntry) => (item.exact ? padNu === item.href : padNu.startsWith(item.href)) || !!item.children?.some((c) => padNu.startsWith(c.href))
+  const sectieOpen = (sec: { title?: string; open: boolean; items: NavEntry[] }) =>
+    !sec.title || sec.items.some(isHier) || (sectieKeuze[sec.title] ?? sec.open)
+  const wisselSectie = (titel: string, nu: boolean) => {
+    const v = { ...sectieKeuze, [titel]: !nu }
+    setSectieKeuze(v)
+    try { localStorage.setItem('ngm-zijbalk-secties', JSON.stringify(v)) } catch { /* geen opslag */ }
   }
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-[var(--sidebar-width)] bg-white border-r border-gray-200 flex flex-col z-30">
-      {/* Logo + refresh */}
-      <div className="px-4 py-5 border-b border-gray-100">
-        <div className="flex items-center gap-3">
-          <div className="h-8 w-8 rounded-lg bg-[#fff848] flex items-center justify-center shrink-0">
-            <span className="font-bold text-black text-xs">NG</span>
+    <>
+      {/* ── Gsm, werknemers (zonder bovenbalk): vaste balk achter de menuknop ── */}
+      {isEmployee && <div className="md:hidden fixed top-0 inset-x-0 z-30 h-[60px] glas border-x-0 border-t-0" />}
+
+      {/* ── Mobile hamburger button ── */}
+      <button
+        className={cn('md:hidden fixed top-2.5 left-3 z-50 h-10 w-10 flex items-center justify-center rounded-full glas shadow-md text-gray-900', mobileOpen && 'hidden')}
+        onClick={() => setMobileOpen(true)}
+        aria-label="Menu openen"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+
+      {/* ── Backdrop ── */}
+      {mobileOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/40 z-40"
+          onClick={closeMobile}
+        />
+      )}
+
+      {/* ── Sidebar panel ── */}
+      <aside
+        className={cn(
+          'fixed left-3 top-3 bottom-3 w-[240px] max-w-[calc(100vw-24px)] glas rounded-[18px] shadow-xl text-gray-700 flex flex-col z-40 overflow-hidden',
+          'transition-transform duration-300 ease-in-out',
+          'md:translate-x-0',
+          mobileOpen ? 'translate-x-0' : '-translate-x-[110%]',
+        )}
+      >
+        {/* Logo + close */}
+        <div className="px-5 pt-5 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <Woordmerk className="h-[30px]" />
+            </div>
+            {/* Refresh */}
+            <button
+              onClick={refresh}
+              disabled={spinning}
+              title="Pagina vernieuwen"
+              className="h-8 w-8 flex items-center justify-center rounded-full text-gray-500 hover:bg-white hover:text-gray-900 hover:shadow-sm transition-colors"
+            >
+              <RefreshCcw className={cn('h-3.5 w-3.5', spinning && 'animate-spin')} />
+            </button>
+            {/* Close (mobile) */}
+            <button
+              onClick={closeMobile}
+              className="md:hidden h-8 w-8 flex items-center justify-center rounded-full text-gray-500 hover:bg-white hover:text-gray-900"
+              aria-label="Menu sluiten"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-bold text-black leading-tight">NextGenMedia</div>
-            <div className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">Admin</div>
-          </div>
+        </div>
+
+        {/* WIE ZIT HIER?
+            Op een gedeelde laptop, of met twee accounts naast elkaar, wil je in
+            één oogopslag zien namens wie je werkt — zeker bij het bellen, waar
+            een lead aan de verkeerde setter toegewezen raakt als je het
+            misgokt. Daarom de voornaam groot en het e-mailadres eronder: de
+            naam voor het gemak, het adres als het harde antwoord. */}
+        {(naam || email) && (
+          <Link href="/admin/account" prefetch={false} onClick={closeMobile} title="Mijn account"
+            className={cn('mx-3 mb-1 px-3 py-2.5 rounded-2xl bg-white/60 border border-white/80 flex items-center gap-2.5 hover:bg-white transition-colors', padNu.startsWith('/admin/account') && 'bg-white')}>
+            <span className="h-8 w-8 shrink-0 rounded-full bg-white text-gray-900 shadow-sm flex items-center justify-center text-sm font-semibold overflow-hidden">
+              {fotoVersie && !fotoKapot
+                ? <img src={`/api/admin/account/foto?v=${encodeURIComponent(fotoVersie)}`} alt="" className="h-full w-full object-cover" onError={() => setFotoKapot(true)} />
+                // Geen eigen foto (Mijn account): die uit Personeel (zelfde voornaam), anders de initiaal.
+                : naam ? <PersoonFoto naam={naam} maat={32} /> : (email || '?').charAt(0).toUpperCase()}
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-gray-900 leading-tight truncate">
+                {naam || 'Mijn account'}
+              </div>
+              {email && <div className="text-[10px] text-gray-400 truncate" title={email}>{email}</div>}
+            </div>
+          </Link>
+        )}
+
+        <BedrijfSchakelaar huidig={bedrijfFilter} vast={bedrijfVast} />
+
+        {/* Navigation */}
+        <nav className="flex-1 px-3 py-3 overflow-y-auto no-scrollbar">
+          {/* Wie ook een personeelsdossier heeft: inklokken, planning en
+              beschikbaarheid, met dezelfde login als het portaal. */}
+          {mijnWerk && (
+            <Link href="/team" prefetch={false} onClick={closeMobile} className="sidebar-item mb-3 text-gray-900 bg-geel-zacht hover:bg-geel-zacht">
+              <Timer className="h-4 w-4 shrink-0" />
+              Mijn werk · inklokken
+            </Link>
+          )}
+          {visibleSections.map((section, si) => {
+            const open = sectieOpen(section)
+            const telling = section.items.reduce((n, it) => n + (it.badge ? (badges[it.badge] ?? 0) : 0), 0)
+            return (
+              <div key={section.title ?? `sec-${si}`} className={si > 0 ? 'mt-3' : ''}>
+                {section.title && (
+                  <button type="button" onClick={() => wisselSectie(section.title!, open)} aria-expanded={open}
+                    className="w-full px-3.5 py-1 mb-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] font-normal text-gray-400 hover:text-gray-700 rounded-lg">
+                    <span className="flex-1 text-left">{section.title}</span>
+                    {!open && telling > 0 && <span className="min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">{telling > 99 ? '99+' : telling}</span>}
+                    <ChevronDown className={cn('h-3 w-3 transition-transform', !open && '-rotate-90')} />
+                  </button>
+                )}
+                {open && (
+                  <div className="space-y-0.5">
+                    {section.items.map((item) => (
+                      <NavItem key={item.href} item={item} onNavigate={closeMobile}
+                        badge={item.badge ? (badges[item.badge] ?? 0) : 0} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </nav>
+
+        {/* Instellingen (centraal beheer) + eigen account + uitloggen */}
+        <div className="px-3 py-3 border-t border-black/[0.05] space-y-0.5">
+          {toonInstellingen && <OpslagMeter onNavigate={closeMobile} />}
+          {toonInstellingen && (
+            <Link href="/admin/instellingen" prefetch={false} onClick={closeMobile}
+              className={cn('sidebar-item', padNu.startsWith('/admin/instellingen') && 'active')}>
+              <Settings className="h-4 w-4 shrink-0" />
+              Instellingen
+            </Link>
+          )}
           <button
-            onClick={handleRefresh}
-            title="Pagina vernieuwen"
-            className="h-7 w-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+            onClick={handleLogout}
+            className="sidebar-item w-full text-red-600 hover:text-red-700 hover:bg-red-50"
           >
-            <RefreshCcw className={cn('h-3.5 w-3.5', isPending && 'animate-spin')} />
+            <LogOut className="h-4 w-4 shrink-0" />
+            Uitloggen
           </button>
         </div>
-      </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {NAV.map((item) => (
-          <NavItem key={item.href} item={item} />
-        ))}
-      </nav>
-
-      {/* Logout */}
-      <div className="px-3 py-4 border-t border-gray-100">
-        <button
-          onClick={handleLogout}
-          className="sidebar-item w-full text-red-500 hover:text-red-600 hover:bg-red-50"
-        >
-          <LogOut className="h-4 w-4 shrink-0" />
-          Uitloggen
-        </button>
-      </div>
-    </aside>
+      </aside>
+    </>
   )
 }

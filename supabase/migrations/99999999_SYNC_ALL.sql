@@ -1,0 +1,9376 @@
+-- ═════════════════════════════════════════════════════════════════════════════
+--  NEXTGENMEDIA — VOLLEDIG SYNC-SCRIPT
+--
+--  Eén script dat ALLE kolommen, tabellen en buckets toevoegt die de huidige
+--  applicatiecode verwacht. Volledig idempotent: veilig om meerdere keren te
+--  runnen. Voegt alleen toe wat ontbreekt, verwijdert of overschrijft niets.
+--
+--  GEBRUIK: plak dit volledig in de Supabase SQL Editor en klik Run.
+-- ═════════════════════════════════════════════════════════════════════════════
+
+-- ── clients ──────────────────────────────────────────────────────────────────
+ALTER TABLE public.clients
+  ADD COLUMN IF NOT EXISTS archived_at    timestamptz,
+  ADD COLUMN IF NOT EXISTS revenue_value  numeric,
+  ADD COLUMN IF NOT EXISTS revenue_type   text,
+  -- Sinds wanneer is dit een klant bij ons (kan vroeger zijn dan created_at).
+  -- Bepaalt het commissiejaar (10/8/5%) voor aangeleverde commissiedeals.
+  ADD COLUMN IF NOT EXISTS customer_since date,
+  -- Laatst door admin ingestelde login-wachtwoord (klaartekst, admin-only).
+  -- Alleen gevuld als admin het wachtwoord zelf instelt/reset.
+  ADD COLUMN IF NOT EXISTS login_password text;
+
+-- Backfill customer_since from created_at where empty
+UPDATE public.clients SET customer_since = created_at::date WHERE customer_since IS NULL;
+
+-- ── freelancers: store the admin-set login password (admin-only) ──────────────
+ALTER TABLE public.freelancers
+  ADD COLUMN IF NOT EXISTS login_password text;
+
+-- ── contracts: looptijd voor reeds-getekende uploads ─────────────────────────
+ALTER TABLE public.contracts
+  ADD COLUMN IF NOT EXISTS start_date date,
+  ADD COLUMN IF NOT EXISTS end_date   date;
+
+-- ── client_services: portal access defaults to false (admin grants later) ─────
+ALTER TABLE public.client_services
+  ALTER COLUMN active SET DEFAULT false;
+
+-- ── contracts: signature zone, signed pdf, service tag, AI fields ─────────────
+ALTER TABLE public.contracts
+  ADD COLUMN IF NOT EXISTS service_slug     text,
+  ADD COLUMN IF NOT EXISTS signed_pdf_path  text,
+  ADD COLUMN IF NOT EXISTS sig_page         integer NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS sig_x_pct        numeric NOT NULL DEFAULT 5,
+  ADD COLUMN IF NOT EXISTS sig_y_pct        numeric NOT NULL DEFAULT 25,
+  ADD COLUMN IF NOT EXISTS sig_width        numeric NOT NULL DEFAULT 200,
+  ADD COLUMN IF NOT EXISTS sig_height       numeric NOT NULL DEFAULT 60,
+  ADD COLUMN IF NOT EXISTS signer_name      text,
+  ADD COLUMN IF NOT EXISTS signer_email     text,
+  ADD COLUMN IF NOT EXISTS detected_fields  jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS field_values     jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+-- ── social_content_items: multi-platform ──────────────────────────────────────
+ALTER TABLE public.social_content_items
+  ADD COLUMN IF NOT EXISTS platforms text[] NOT NULL DEFAULT '{}'::text[];
+
+UPDATE public.social_content_items
+   SET platforms = ARRAY[platform]
+ WHERE platform IS NOT NULL AND platforms = '{}'::text[];
+
+-- ── webdesign_change_requests: image paths + friendly kind buckets ────────────
+ALTER TABLE public.webdesign_change_requests
+  ADD COLUMN IF NOT EXISTS image_paths text[]  NOT NULL DEFAULT '{}'::text[],
+  ADD COLUMN IF NOT EXISTS image_urls  jsonb   NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS categories  text[]  NOT NULL DEFAULT '{}'::text[],
+  ADD COLUMN IF NOT EXISTS admin_notes text,
+  ADD COLUMN IF NOT EXISTS updated_at  timestamptz NOT NULL DEFAULT now();
+
+-- Relax the kind CHECK so portal values (text/color/image/other) are allowed.
+DO $$
+BEGIN
+  ALTER TABLE public.webdesign_change_requests DROP CONSTRAINT IF EXISTS webdesign_change_requests_kind_check;
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── revenue_entries: title + billing frequency ────────────────────────────────
+ALTER TABLE public.revenue_entries
+  ADD COLUMN IF NOT EXISTS title             text,
+  ADD COLUMN IF NOT EXISTS billing_frequency text NOT NULL DEFAULT 'monthly';
+
+-- ── freelancers (partners): finance/profile fields (both schema variants) ─────
+ALTER TABLE public.freelancers
+  ADD COLUMN IF NOT EXISTS name                   text,
+  ADD COLUMN IF NOT EXISTS company                text,
+  ADD COLUMN IF NOT EXISTS company_name           text,
+  ADD COLUMN IF NOT EXISTS vat_number             text,
+  ADD COLUMN IF NOT EXISTS iban                   text,
+  ADD COLUMN IF NOT EXISTS commission_pct         numeric DEFAULT 10,
+  ADD COLUMN IF NOT EXISTS default_commission_pct numeric DEFAULT 10,
+  ADD COLUMN IF NOT EXISTS region                 text,
+  ADD COLUMN IF NOT EXISTS active                 boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS notes                  text,
+  ADD COLUMN IF NOT EXISTS bio                    text;
+
+-- Backfill name from full_name if the legacy column exists
+DO $$
+BEGIN
+  UPDATE public.freelancers SET name = full_name WHERE name IS NULL AND full_name IS NOT NULL;
+EXCEPTION WHEN undefined_column THEN NULL; END $$;
+
+-- ── freelancer_assignments: modern columns + origin + deal_type ───────────────
+ALTER TABLE public.freelancer_assignments
+  ADD COLUMN IF NOT EXISTS title        text,
+  ADD COLUMN IF NOT EXISTS description  text,
+  ADD COLUMN IF NOT EXISTS budget       numeric,
+  ADD COLUMN IF NOT EXISTS payout       numeric,
+  ADD COLUMN IF NOT EXISTS deadline     date,
+  ADD COLUMN IF NOT EXISTS service_slug text,
+  ADD COLUMN IF NOT EXISTS roles        text[] NOT NULL DEFAULT '{}'::text[],
+  ADD COLUMN IF NOT EXISTS status       text   NOT NULL DEFAULT 'open',
+  ADD COLUMN IF NOT EXISTS origin       text   NOT NULL DEFAULT 'admin',
+  ADD COLUMN IF NOT EXISTS deal_type    text   NOT NULL DEFAULT 'fixed';
+
+-- Make the legacy NOT NULL `role` column optional (newer code uses roles[])
+DO $$
+BEGIN
+  ALTER TABLE public.freelancer_assignments ALTER COLUMN role DROP NOT NULL;
+EXCEPTION WHEN undefined_column THEN NULL; END $$;
+
+CREATE INDEX IF NOT EXISTS idx_assignments_origin ON public.freelancer_assignments (origin);
+
+-- ── partner_ledger_entries (create if missing) ────────────────────────────────
+DO $$ BEGIN
+  CREATE TYPE public.partner_ledger_kind AS ENUM
+    ('payout_owed','commission_owed','service_billed','manual_credit','manual_debit','settlement');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE public.partner_ledger_status AS ENUM ('pending','settled','cancelled');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS public.partner_ledger_entries (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  freelancer_id uuid NOT NULL REFERENCES public.freelancers(id) ON DELETE CASCADE,
+  kind          public.partner_ledger_kind NOT NULL,
+  status        public.partner_ledger_status NOT NULL DEFAULT 'pending',
+  amount        numeric NOT NULL,
+  description   text,
+  client_id     uuid,
+  assignment_id uuid,
+  occurred_on   date NOT NULL DEFAULT CURRENT_DATE,
+  settlement_id uuid,
+  metadata      jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_by    uuid,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.partner_ledger_entries
+  ADD COLUMN IF NOT EXISTS direction          text,
+  ADD COLUMN IF NOT EXISTS commission_deal_id uuid,
+  ADD COLUMN IF NOT EXISTS commission_year    integer;
+
+UPDATE public.partner_ledger_entries
+   SET direction = CASE WHEN amount >= 0 THEN 'we_pay_partner' ELSE 'partner_pays_us' END
+ WHERE direction IS NULL;
+
+ALTER TABLE public.partner_ledger_entries ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "ledger admin all"        ON public.partner_ledger_entries;
+DROP POLICY IF EXISTS "ledger partner read own" ON public.partner_ledger_entries;
+CREATE POLICY "ledger admin all" ON public.partner_ledger_entries
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+CREATE POLICY "ledger partner read own" ON public.partner_ledger_entries
+  FOR SELECT TO authenticated
+  USING (freelancer_id IN (SELECT id FROM public.freelancers WHERE user_id = auth.uid()));
+
+-- ── partner_settlements (create if missing) ───────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.partner_settlements (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  freelancer_id         uuid NOT NULL REFERENCES public.freelancers(id) ON DELETE CASCADE,
+  period_start          date NOT NULL,
+  period_end            date NOT NULL,
+  total_owed_to_partner numeric NOT NULL DEFAULT 0,
+  total_owed_by_partner numeric NOT NULL DEFAULT 0,
+  net_amount            numeric NOT NULL DEFAULT 0,
+  status                text NOT NULL DEFAULT 'draft',
+  notes                 text,
+  finalized_at          timestamptz,
+  paid_at               timestamptz,
+  created_by            uuid,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.partner_settlements ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "settlements admin all"        ON public.partner_settlements;
+DROP POLICY IF EXISTS "settlements partner read own" ON public.partner_settlements;
+CREATE POLICY "settlements admin all" ON public.partner_settlements
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+CREATE POLICY "settlements partner read own" ON public.partner_settlements
+  FOR SELECT TO authenticated
+  USING (freelancer_id IN (SELECT id FROM public.freelancers WHERE user_id = auth.uid()));
+
+-- ── partner_commission_deals ──────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.partner_commission_deals (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  freelancer_id  uuid NOT NULL REFERENCES public.freelancers(id) ON DELETE CASCADE,
+  client_id      uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  label          text,
+  service_slug   text,
+  contract_value numeric NOT NULL DEFAULT 0,
+  start_date     date NOT NULL DEFAULT CURRENT_DATE,
+  pct_year_1     numeric NOT NULL DEFAULT 10,
+  pct_year_2     numeric NOT NULL DEFAULT 8,
+  pct_year_3     numeric NOT NULL DEFAULT 5,
+  status         text NOT NULL DEFAULT 'active',
+  notes          text,
+  created_by     uuid,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_commission_deals_freelancer ON public.partner_commission_deals(freelancer_id);
+
+ALTER TABLE public.partner_commission_deals ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "commission deals admin all"   ON public.partner_commission_deals;
+DROP POLICY IF EXISTS "commission deals partner read" ON public.partner_commission_deals;
+CREATE POLICY "commission deals admin all" ON public.partner_commission_deals
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+CREATE POLICY "commission deals partner read" ON public.partner_commission_deals
+  FOR SELECT TO authenticated
+  USING (freelancer_id IN (SELECT id FROM public.freelancers WHERE user_id = auth.uid()));
+
+-- ── updated_at triggers (best effort; helper may not exist on all projects) ───
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS trg_partner_ledger_updated      ON public.partner_ledger_entries;
+  CREATE TRIGGER trg_partner_ledger_updated      BEFORE UPDATE ON public.partner_ledger_entries     FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+  DROP TRIGGER IF EXISTS trg_partner_settlements_updated ON public.partner_settlements;
+  CREATE TRIGGER trg_partner_settlements_updated BEFORE UPDATE ON public.partner_settlements         FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+  DROP TRIGGER IF EXISTS trg_commission_deals_updated    ON public.partner_commission_deals;
+  CREATE TRIGGER trg_commission_deals_updated    BEFORE UPDATE ON public.partner_commission_deals    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── partner_commission_deals: referral now works without an upfront value ─────
+-- A commission deal = a REFERRAL relationship (partner + client + referred_at +
+-- the 3 yearly %s). Individual sales live in partner_commission_sales below, so
+-- contract_value is no longer required.
+DO $$
+BEGIN
+  ALTER TABLE public.partner_commission_deals ALTER COLUMN contract_value DROP NOT NULL;
+  ALTER TABLE public.partner_commission_deals ALTER COLUMN contract_value SET DEFAULT 0;
+EXCEPTION WHEN undefined_column THEN NULL; END $$;
+
+-- Commissie-RICHTING van een doorverwijzing:
+--   'we_pay_partner'  = partner verwees klant NAAR ons  → WIJ betalen partner   (scenario 1)
+--   'partner_pays_us' = WIJ verwezen klant naar partner → PARTNER betaalt ons   (scenario 2)
+-- Onderaanneming (vast bedrag) loopt NIET via deze tabel en levert nooit commissie op.
+ALTER TABLE public.partner_commission_deals
+  ADD COLUMN IF NOT EXISTS direction text NOT NULL DEFAULT 'we_pay_partner';
+
+-- ── partner_commission_sales: one row per sale to a referred client ───────────
+-- Each sale earns commission at the rate of the referral year it falls in.
+CREATE TABLE IF NOT EXISTS public.partner_commission_sales (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id       uuid NOT NULL REFERENCES public.partner_commission_deals(id) ON DELETE CASCADE,
+  freelancer_id uuid NOT NULL REFERENCES public.freelancers(id) ON DELETE CASCADE,
+  service_slug  text,
+  description   text,
+  sale_amount   numeric NOT NULL,
+  sale_date     date NOT NULL DEFAULT CURRENT_DATE,
+  commission_year integer NOT NULL,
+  commission_pct  numeric NOT NULL,
+  commission_amount numeric NOT NULL,
+  ledger_id     uuid,          -- the generated partner_ledger_entries row
+  created_by    uuid,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_commission_sales_deal ON public.partner_commission_sales(deal_id);
+CREATE INDEX IF NOT EXISTS idx_commission_sales_freelancer ON public.partner_commission_sales(freelancer_id);
+
+ALTER TABLE public.partner_commission_sales ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "commission sales admin all"    ON public.partner_commission_sales;
+DROP POLICY IF EXISTS "commission sales partner read" ON public.partner_commission_sales;
+CREATE POLICY "commission sales admin all" ON public.partner_commission_sales
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+CREATE POLICY "commission sales partner read" ON public.partner_commission_sales
+  FOR SELECT TO authenticated
+  USING (freelancer_id IN (SELECT id FROM public.freelancers WHERE user_id = auth.uid()));
+
+-- ── audit_log: onveranderlijk logboek van gevoelige acties (GDPR/security) ─────
+-- Puur additief. Schrijven gebeurt met de service-role (bypasst RLS); admins
+-- mogen lezen. Niemand mag via de client wijzigen of verwijderen → append-only.
+CREATE TABLE IF NOT EXISTS public.audit_log (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_user_id uuid,                 -- wie voerde de actie uit (auth.users.id)
+  actor_email   text,
+  actor_role    text,
+  action        text NOT NULL,        -- bv. 'client.credentials.update'
+  entity_type   text,                 -- bv. 'client', 'partner', 'settlement'
+  entity_id     text,
+  summary       text,                 -- korte, menselijke omschrijving
+  metadata      jsonb NOT NULL DEFAULT '{}'::jsonb,  -- nooit wachtwoorden/secrets
+  ip            text,
+  user_agent    text,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_created   ON public.audit_log (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_entity    ON public.audit_log (entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_actor     ON public.audit_log (actor_user_id);
+
+ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
+-- Admins mogen het logboek lezen. Schrijven loopt uitsluitend via de service-role
+-- (die RLS overslaat), dus er is bewust GEEN insert/update/delete policy → het
+-- log is niet te manipuleren vanuit een gewone (admin- of klant-)sessie.
+DROP POLICY IF EXISTS "audit_log admin read" ON public.audit_log;
+CREATE POLICY "audit_log admin read" ON public.audit_log
+  FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- ── ClickUp-sync (app → ClickUp, één richting) ────────────────────────────────
+-- Puur additief. Per klant aan/uit schakelbaar + opgeslagen folder/list-id zodat
+-- we niet telkens opnieuw zoeken. Per contentitem het ClickUp task-id + een hash
+-- van de gesyncte velden (om onnodige API-calls over te slaan).
+ALTER TABLE public.clients
+  ADD COLUMN IF NOT EXISTS clickup_sync_enabled boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS clickup_folder_id    text,
+  ADD COLUMN IF NOT EXISTS clickup_list_id      text;
+
+ALTER TABLE public.social_content_items
+  ADD COLUMN IF NOT EXISTS clickup_task_id    text,
+  ADD COLUMN IF NOT EXISTS clickup_sync_hash  text,
+  ADD COLUMN IF NOT EXISTS clickup_synced_at  timestamptz;
+
+CREATE INDEX IF NOT EXISTS idx_social_items_clickup_task ON public.social_content_items (clickup_task_id);
+
+-- ── shoot_briefings: contentshoot-info per klant (admin beheert, klant leest) ──
+-- Puur additief. Eén of meerdere shoots per klant met datum/uur/locatie + een
+-- vrij briefing-tekstveld. Geen workflow/statussen.
+CREATE TABLE IF NOT EXISTS public.shoot_briefings (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id   uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  shoot_date  date,
+  start_time  text,
+  end_time    text,
+  location    text,
+  briefing    text,
+  created_by  uuid,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_shoot_briefings_client ON public.shoot_briefings(client_id);
+
+ALTER TABLE public.shoot_briefings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "shoot admin all"        ON public.shoot_briefings;
+DROP POLICY IF EXISTS "shoot client read own"  ON public.shoot_briefings;
+CREATE POLICY "shoot admin all" ON public.shoot_briefings
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+CREATE POLICY "shoot client read own" ON public.shoot_briefings
+  FOR SELECT TO authenticated
+  USING (client_id IN (SELECT id FROM public.clients WHERE owner_user_id = auth.uid()));
+
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS trg_shoot_briefings_updated ON public.shoot_briefings;
+  CREATE TRIGGER trg_shoot_briefings_updated BEFORE UPDATE ON public.shoot_briefings FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── shoot_briefing_feedback: eenvoudige feedback/comments onder een briefing ──
+-- Klant plaatst feedback (via server na eigendomscheck); admin markeert verwerkt.
+CREATE TABLE IF NOT EXISTS public.shoot_briefing_feedback (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  shoot_id    uuid NOT NULL REFERENCES public.shoot_briefings(id) ON DELETE CASCADE,
+  client_id   uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  author_role text NOT NULL DEFAULT 'client',  -- 'client' | 'admin'
+  message     text NOT NULL,
+  resolved    boolean NOT NULL DEFAULT false,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_shoot_feedback_shoot ON public.shoot_briefing_feedback(shoot_id);
+
+ALTER TABLE public.shoot_briefing_feedback ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "shoot fb admin all"       ON public.shoot_briefing_feedback;
+DROP POLICY IF EXISTS "shoot fb client read own" ON public.shoot_briefing_feedback;
+CREATE POLICY "shoot fb admin all" ON public.shoot_briefing_feedback
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+CREATE POLICY "shoot fb client read own" ON public.shoot_briefing_feedback
+  FOR SELECT TO authenticated
+  USING (client_id IN (SELECT id FROM public.clients WHERE owner_user_id = auth.uid()));
+
+-- ── month_planning_overrides: handmatige uitzonderingen op de maandplanning ────
+-- Interne NextGenMedia-planning. Standaard blijft automatisch (op werkdagen);
+-- per datum kan admin de fases overschrijven (verslepen / aanpassen). Een lege
+-- array betekent 'deze dag bewust leeg'. Geen rij = standaardberekening.
+CREATE TABLE IF NOT EXISTS public.month_planning_overrides (
+  plan_date   date PRIMARY KEY,
+  categories  text[] NOT NULL DEFAULT '{}'::text[],
+  updated_by  uuid,
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.month_planning_overrides ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "month plan admin all" ON public.month_planning_overrides;
+CREATE POLICY "month plan admin all" ON public.month_planning_overrides
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- ── cost_entries: kosten (eenmalig + recurring) voor het financieel dashboard ─
+-- Bedragen excl. btw + btw%; incl. wordt berekend. Admin-only.
+CREATE TABLE IF NOT EXISTS public.cost_entries (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name              text,
+  category          text,
+  type              text NOT NULL DEFAULT 'one_time',   -- 'one_time' | 'recurring'
+  cost_date         date,                                -- eenmalig
+  start_date        date,                                -- recurring
+  end_date          date,                                -- recurring (optioneel)
+  billing_frequency text NOT NULL DEFAULT 'monthly',     -- monthly | quarterly | annual
+  amount_excl       numeric NOT NULL DEFAULT 0,
+  vat_pct           numeric NOT NULL DEFAULT 21,
+  notes             text,
+  created_by        uuid,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cost_entries_type ON public.cost_entries(type);
+
+ALTER TABLE public.cost_entries ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "costs admin all" ON public.cost_entries;
+CREATE POLICY "costs admin all" ON public.cost_entries
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS trg_cost_entries_updated ON public.cost_entries;
+  CREATE TRIGGER trg_cost_entries_updated BEFORE UPDATE ON public.cost_entries FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── fiscal_settings: instelbare fiscale parameters + loon per boekjaar ────────
+-- Geen hardcoded percentages in de code: deze waarden zijn admin-instelbaar en
+-- wijzigen jaarlijks. Eén rij per boekjaar.
+CREATE TABLE IF NOT EXISTS public.fiscal_settings (
+  year                   integer PRIMARY KEY,
+  corporate_tax_pct      numeric NOT NULL DEFAULT 25,
+  reduced_tax_pct        numeric NOT NULL DEFAULT 20,
+  reduced_tax_limit      numeric NOT NULL DEFAULT 100000,
+  social_pct_band1       numeric NOT NULL DEFAULT 20.5,
+  social_pct_band2       numeric NOT NULL DEFAULT 14.16,
+  income_band1_limit     numeric NOT NULL DEFAULT 75000,
+  income_band2_limit     numeric NOT NULL DEFAULT 115000,
+  mgmt_fee_pct           numeric NOT NULL DEFAULT 3.05,
+  min_quarter            numeric NOT NULL DEFAULT 870,
+  max_quarter            numeric NOT NULL DEFAULT 5000,
+  extra_pct              numeric NOT NULL DEFAULT 0,
+  extra_fixed            numeric NOT NULL DEFAULT 0,
+  salary_gross_monthly   numeric NOT NULL DEFAULT 0,
+  salary_months          integer NOT NULL DEFAULT 12,
+  statuut                text NOT NULL DEFAULT 'zaakvoerder',
+  include_social_as_cost boolean NOT NULL DEFAULT false,
+  updated_by             uuid,
+  updated_at             timestamptz NOT NULL DEFAULT now()
+);
+
+-- Dashboard 3.0: BTW%, cash-reserve%, cash op rekening, opnames vennoten
+ALTER TABLE public.fiscal_settings
+  ADD COLUMN IF NOT EXISTS vat_pct          numeric NOT NULL DEFAULT 21,
+  ADD COLUMN IF NOT EXISTS cash_reserve_pct numeric NOT NULL DEFAULT 25,
+  ADD COLUMN IF NOT EXISTS cash_on_account  numeric NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS partner_draws    numeric NOT NULL DEFAULT 0;
+
+ALTER TABLE public.fiscal_settings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "fiscal admin all" ON public.fiscal_settings;
+CREATE POLICY "fiscal admin all" ON public.fiscal_settings
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- ── vesting (Vestiging-module): config + omzetregistraties ────────────────────
+-- Puur informatief dashboard van het vestigingsprincipe; wijzigt geen echte
+-- aandelen. Admin-only. Eén configrij (id=1) met de instelbare schijf-parameters.
+CREATE TABLE IF NOT EXISTS public.vesting_config (
+  id           integer PRIMARY KEY DEFAULT 1,
+  start_date   date,
+  schijf2_per  numeric NOT NULL DEFAULT 5000,
+  schijf3_y1   numeric NOT NULL DEFAULT 10000,
+  schijf3_y2   numeric NOT NULL DEFAULT 12000,
+  schijf3_y3   numeric NOT NULL DEFAULT 15000,
+  inbound_pct  numeric NOT NULL DEFAULT 30,
+  website_pct  numeric NOT NULL DEFAULT 100,
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.vesting_revenue (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_name     text,
+  service_slug    text,
+  entry_date      date NOT NULL DEFAULT CURRENT_DATE,
+  net_revenue     numeric NOT NULL DEFAULT 0,
+  type            text NOT NULL DEFAULT 'inbound',  -- inbound | outbound | website
+  attribution_pct numeric NOT NULL DEFAULT 0,
+  vesting_revenue numeric NOT NULL DEFAULT 0,
+  created_by      uuid,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+-- Outbound = outreach (50%) + closing (50%); Inbound = closing (25%).
+ALTER TABLE public.vesting_revenue
+  ADD COLUMN IF NOT EXISTS outreach boolean,
+  ADD COLUMN IF NOT EXISTS closing  boolean;
+
+CREATE INDEX IF NOT EXISTS idx_vesting_revenue_date ON public.vesting_revenue(entry_date DESC);
+
+ALTER TABLE public.vesting_config  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vesting_revenue ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "vesting cfg admin all" ON public.vesting_config;
+DROP POLICY IF EXISTS "vesting rev admin all" ON public.vesting_revenue;
+CREATE POLICY "vesting cfg admin all" ON public.vesting_config
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+CREATE POLICY "vesting rev admin all" ON public.vesting_revenue
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- ── purchases: aankoopaanvragen + goedkeuringen (>€1.000) ─────────────────────
+CREATE TABLE IF NOT EXISTS public.purchases (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  title             text,
+  description       text,
+  amount_excl       numeric NOT NULL DEFAULT 0,
+  vat_pct           numeric NOT NULL DEFAULT 21,
+  supplier          text,
+  category          text,
+  requester_user_id uuid,
+  requester_email   text,
+  entry_date        date NOT NULL DEFAULT CURRENT_DATE,
+  attachment_path   text,
+  status            text NOT NULL DEFAULT 'pending',  -- concept|pending|approved|approved_under_threshold|rejected
+  needs_approval    boolean NOT NULL DEFAULT true,
+  cost_entry_id     uuid,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_purchases_status ON public.purchases(status);
+
+CREATE TABLE IF NOT EXISTS public.purchase_approvals (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  purchase_id       uuid NOT NULL REFERENCES public.purchases(id) ON DELETE CASCADE,
+  approver_user_id  uuid,
+  approver_email    text NOT NULL,
+  decision          text NOT NULL,        -- approved | rejected
+  comment           text,
+  decided_at        timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (purchase_id, approver_email)
+);
+CREATE INDEX IF NOT EXISTS idx_purchase_approvals_purchase ON public.purchase_approvals(purchase_id);
+
+ALTER TABLE public.purchases          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.purchase_approvals ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "purchases admin all"  ON public.purchases;
+DROP POLICY IF EXISTS "purchase appr admin"  ON public.purchase_approvals;
+CREATE POLICY "purchases admin all" ON public.purchases
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+CREATE POLICY "purchase appr admin" ON public.purchase_approvals
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS trg_purchases_updated ON public.purchases;
+  CREATE TRIGGER trg_purchases_updated BEFORE UPDATE ON public.purchases FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── shoot_ideas: ideeën/inspiratie van de klant per shoot (geen scriptwijziging) ─
+CREATE TABLE IF NOT EXISTS public.shoot_ideas (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  shoot_id        uuid NOT NULL REFERENCES public.shoot_briefings(id) ON DELETE CASCADE,
+  client_id       uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  title           text,
+  description     text,
+  attachment_path text,
+  status          text NOT NULL DEFAULT 'new',  -- new | seen | use | discard
+  admin_note      text,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_shoot_ideas_shoot ON public.shoot_ideas(shoot_id);
+
+ALTER TABLE public.shoot_ideas ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "shoot ideas admin all"       ON public.shoot_ideas;
+DROP POLICY IF EXISTS "shoot ideas client read own" ON public.shoot_ideas;
+CREATE POLICY "shoot ideas admin all" ON public.shoot_ideas
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+CREATE POLICY "shoot ideas client read own" ON public.shoot_ideas
+  FOR SELECT TO authenticated
+  USING (client_id IN (SELECT id FROM public.clients WHERE owner_user_id = auth.uid()));
+
+-- ── batches: productiebatches (naam/kleur/contentperiode) + klant-koppeling ────
+CREATE TABLE IF NOT EXISTS public.batches (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name         text NOT NULL DEFAULT 'Batch',
+  color        text NOT NULL DEFAULT '#3b82f6',
+  start_month  integer NOT NULL DEFAULT 0,   -- ankermaand contentperiode (0-11)
+  shoot_offset integer NOT NULL DEFAULT 1,   -- aantal maanden vóór content = shoot
+  sort_order   integer NOT NULL DEFAULT 0,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.clients
+  ADD COLUMN IF NOT EXISTS batch_id uuid REFERENCES public.batches(id) ON DELETE SET NULL;
+
+ALTER TABLE public.batches ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "batches admin all" ON public.batches;
+CREATE POLICY "batches admin all" ON public.batches
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS trg_batches_updated ON public.batches;
+  CREATE TRIGGER trg_batches_updated BEFORE UPDATE ON public.batches FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── month_planning_clients: klanten handmatig aan een fase/maand koppelen ─────
+-- Maandplanning wordt klantgericht: per maand (YYYY-MM) koppelt de admin klanten
+-- aan een fase, optioneel met een planning-type (onboarding / strategie) + notitie.
+CREATE TABLE IF NOT EXISTS public.month_planning_clients (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  plan_month    text NOT NULL,                 -- 'YYYY-MM'
+  client_id     uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  phase         text NOT NULL,                 -- fase-slug (zie lib/month-phases)
+  planning_type text,                          -- 'onboarding' | 'strategie' | 'standaard'
+  note          text,
+  sort_order    integer NOT NULL DEFAULT 0,
+  created_by    uuid,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_month_plan_clients_month ON public.month_planning_clients (plan_month);
+
+ALTER TABLE public.month_planning_clients ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "month plan clients admin all" ON public.month_planning_clients;
+CREATE POLICY "month plan clients admin all" ON public.month_planning_clients
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS trg_month_plan_clients_updated ON public.month_planning_clients;
+  CREATE TRIGGER trg_month_plan_clients_updated BEFORE UPDATE ON public.month_planning_clients FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── partner_payments: echte geldstromen (los van de verplichtingen-ledger) ─────
+-- Een betaling vereffent (een deel van) het openstaande saldo. Wordt NOOIT
+-- verwijderd; enkel status: pending → approved | cancelled. Zowel admin als
+-- partner mogen registreren; partner-registraties starten als 'pending'.
+CREATE TABLE IF NOT EXISTS public.partner_payments (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  freelancer_id   uuid NOT NULL REFERENCES public.freelancers(id) ON DELETE CASCADE,
+  direction       text NOT NULL,               -- 'we_pay_partner' | 'partner_pays_us'
+  amount          numeric NOT NULL,
+  paid_on         date NOT NULL DEFAULT CURRENT_DATE,
+  note            text,
+  proof_path      text,
+  status          text NOT NULL DEFAULT 'pending',  -- 'pending' | 'approved' | 'cancelled'
+  created_by_role text,                         -- 'admin' | 'partner'
+  created_by      uuid,
+  approved_by     uuid,
+  approved_at     timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_partner_payments_freelancer ON public.partner_payments (freelancer_id);
+
+ALTER TABLE public.partner_payments ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "partner payments admin all"     ON public.partner_payments;
+DROP POLICY IF EXISTS "partner payments partner read"  ON public.partner_payments;
+DROP POLICY IF EXISTS "partner payments partner insert" ON public.partner_payments;
+CREATE POLICY "partner payments admin all" ON public.partner_payments
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+CREATE POLICY "partner payments partner read" ON public.partner_payments
+  FOR SELECT TO authenticated
+  USING (freelancer_id IN (SELECT id FROM public.freelancers WHERE user_id = auth.uid()));
+CREATE POLICY "partner payments partner insert" ON public.partner_payments
+  FOR INSERT TO authenticated
+  WITH CHECK (freelancer_id IN (SELECT id FROM public.freelancers WHERE user_id = auth.uid()) AND status = 'pending');
+
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS trg_partner_payments_updated ON public.partner_payments;
+  CREATE TRIGGER trg_partner_payments_updated BEFORE UPDATE ON public.partner_payments FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── E-mail Center: templates, verzendlog, meldingsstatus ──────────────────────
+-- Mails gaan nooit automatisch naar klanten; enkel admins versturen bewust.
+-- Admin-meldingen mogen wel automatisch (per uur, via cron).
+CREATE TABLE IF NOT EXISTS public.email_templates (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        text NOT NULL,
+  subject     text NOT NULL DEFAULT '',
+  body        text NOT NULL DEFAULT '',
+  kind        text,                         -- optionele categorie: scripts/contract/shoot/generic
+  created_by  uuid,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.email_templates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "email templates admin all" ON public.email_templates;
+CREATE POLICY "email templates admin all" ON public.email_templates
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+CREATE TABLE IF NOT EXISTS public.email_messages (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  to_email      text NOT NULL,
+  to_client_id  uuid,
+  subject       text NOT NULL,
+  body          text NOT NULL,
+  template_id   uuid,
+  template_name text,
+  kind          text,                       -- scripts/contract/shoot/admin_notify/generic
+  audience      text NOT NULL DEFAULT 'client',  -- 'client' | 'admin'
+  status        text NOT NULL DEFAULT 'sent',    -- 'sent' | 'delivered' | 'error'
+  error         text,
+  provider_id   text,
+  sent_by       uuid,
+  sent_by_email text,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_email_messages_created ON public.email_messages (created_at DESC);
+ALTER TABLE public.email_messages ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "email messages admin all" ON public.email_messages;
+CREATE POLICY "email messages admin all" ON public.email_messages
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- Singleton-rij die bijhoudt tot wanneer admins al gemeld zijn.
+CREATE TABLE IF NOT EXISTS public.admin_notify_state (
+  id           text PRIMARY KEY DEFAULT 'singleton',
+  last_run_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.admin_notify_state ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "admin notify state admin all" ON public.admin_notify_state;
+CREATE POLICY "admin notify state admin all" ON public.admin_notify_state
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS trg_email_templates_updated ON public.email_templates;
+  CREATE TRIGGER trg_email_templates_updated BEFORE UPDATE ON public.email_templates FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── CTA op e-mailtemplates (additief, backward-compatible) ────────────────────
+ALTER TABLE public.email_templates
+  ADD COLUMN IF NOT EXISTS cta_text text,
+  ADD COLUMN IF NOT EXISTS cta_link text;
+
+-- ── Rapportlog-velden op email_messages (admin-rapportmails) ──────────────────
+ALTER TABLE public.email_messages
+  ADD COLUMN IF NOT EXISTS trigger_type text,      -- 'auto' | 'manual' | 'event'
+  ADD COLUMN IF NOT EXISTS item_count   integer,
+  ADD COLUMN IF NOT EXISTS related_id   text;       -- gerelateerde aanvraag/klant/script
+
+-- ── Throttle voor event-gedreven adminmails (1 mail per sleutel per uur) ───────
+-- Bv. key = 'scripts:<client_id>' → max één scriptmelding per klant per uur.
+CREATE TABLE IF NOT EXISTS public.admin_notify_throttle (
+  key          text PRIMARY KEY,
+  last_sent_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.admin_notify_throttle ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "admin throttle admin all" ON public.admin_notify_throttle;
+CREATE POLICY "admin throttle admin all" ON public.admin_notify_throttle
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- ── client_tasks: taken die admin aan een klant geeft (alle diensten) ─────────
+CREATE TABLE IF NOT EXISTS public.client_tasks (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id     uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  title         text NOT NULL,
+  description   text,
+  deadline      date,
+  priority      text NOT NULL DEFAULT 'normaal',  -- laag | normaal | hoog
+  status        text NOT NULL DEFAULT 'open',      -- open | in_progress | done | cancelled
+  attachment_path text,
+  attachment_name text,
+  client_note   text,
+  completed_at  timestamptz,
+  created_by    uuid,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.client_tasks ADD COLUMN IF NOT EXISTS attachment_name text;
+CREATE INDEX IF NOT EXISTS idx_client_tasks_client ON public.client_tasks (client_id);
+
+ALTER TABLE public.client_tasks ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "client tasks admin all"  ON public.client_tasks;
+DROP POLICY IF EXISTS "client tasks read own"   ON public.client_tasks;
+CREATE POLICY "client tasks admin all" ON public.client_tasks
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+CREATE POLICY "client tasks read own" ON public.client_tasks
+  FOR SELECT TO authenticated
+  USING (client_id IN (SELECT id FROM public.clients WHERE owner_user_id = auth.uid()));
+
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS trg_client_tasks_updated ON public.client_tasks;
+  CREATE TRIGGER trg_client_tasks_updated BEFORE UPDATE ON public.client_tasks FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── invoices: interne factuuropvolging, gekoppeld aan revenue_entries ─────────
+-- Geen boekhoudpakket: enkel "wat moeten we factureren / gefactureerd / betaald"
+-- en de koppeling met de omzetmodule. Bedragen excl. btw als basis.
+CREATE TABLE IF NOT EXISTS public.invoices (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id     uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  service_slug  text,
+  invoice_month text NOT NULL,                  -- 'YYYY-MM'
+  invoice_date  date,
+  description   text,
+  amount_excl   numeric NOT NULL DEFAULT 0,
+  vat_pct       numeric NOT NULL DEFAULT 21,
+  amount_incl   numeric NOT NULL DEFAULT 0,
+  status        text NOT NULL DEFAULT 'te_factureren', -- te_factureren | gefactureerd | betaald | geannuleerd
+  revenue_id    uuid REFERENCES public.revenue_entries(id) ON DELETE SET NULL,
+  note          text,
+  created_by    uuid,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_invoices_month ON public.invoices (invoice_month);
+CREATE INDEX IF NOT EXISTS idx_invoices_revenue ON public.invoices (revenue_id);
+
+ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "invoices admin all" ON public.invoices;
+CREATE POLICY "invoices admin all" ON public.invoices
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS trg_invoices_updated ON public.invoices;
+  CREATE TRIGGER trg_invoices_updated BEFORE UPDATE ON public.invoices FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── Blogs: per-klant instellingen + gegenereerde blogs + Framer-publicatie ────
+-- Additieve kolommen op clients (bloginstellingen + Framer-config). API key wordt
+-- versleuteld opgeslagen (AES-GCM, lib/crypto) — nooit als platte tekst exposen.
+ALTER TABLE public.clients
+  ADD COLUMN IF NOT EXISTS blogs_inbegrepen              boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS blog_startdatum               date,
+  ADD COLUMN IF NOT EXISTS blog_frequentie_maanden       integer NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS blog_aantal_per_cyclus        integer NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS blog_volgende_generatie_datum date,
+  ADD COLUMN IF NOT EXISTS blog_brand_context            text,
+  ADD COLUMN IF NOT EXISTS framer_project_url            text,
+  ADD COLUMN IF NOT EXISTS framer_api_key                text,   -- AES-GCM encrypted
+  ADD COLUMN IF NOT EXISTS framer_blog_collection_id     text,
+  ADD COLUMN IF NOT EXISTS framer_field_map              jsonb;
+
+CREATE TABLE IF NOT EXISTS public.blogs (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id        uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  titel            text NOT NULL DEFAULT '',
+  slug             text NOT NULL DEFAULT '',
+  content          text,
+  meta_title       text,
+  meta_description text,
+  thumbnail_url    text,
+  status           text NOT NULL DEFAULT 'klaar_voor_review', -- klaar_voor_review | goedgekeurd | gepubliceerd | gefaald
+  gegenereerd_op   timestamptz NOT NULL DEFAULT now(),
+  goedgekeurd_op   timestamptz,
+  gepubliceerd_op  timestamptz,
+  framer_item_id   text,
+  foutmelding      text,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_blogs_client ON public.blogs (client_id);
+CREATE INDEX IF NOT EXISTS idx_blogs_status ON public.blogs (status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_blogs_client_slug ON public.blogs (client_id, slug);
+
+ALTER TABLE public.blogs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "blogs admin all" ON public.blogs;
+CREATE POLICY "blogs admin all" ON public.blogs
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS trg_blogs_updated ON public.blogs;
+  CREATE TRIGGER trg_blogs_updated BEFORE UPDATE ON public.blogs FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── Framer Manager: publicatielogs + laatste synchronisatie ───────────────────
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS framer_last_sync timestamptz;
+
+CREATE TABLE IF NOT EXISTS public.framer_logs (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id   uuid REFERENCES public.clients(id) ON DELETE CASCADE,
+  blog_id     uuid,
+  actie       text NOT NULL,             -- connect | publish | deploy | disconnect | test
+  status      text NOT NULL,             -- ok | gefaald
+  foutmelding text,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_framer_logs_client ON public.framer_logs (client_id);
+CREATE INDEX IF NOT EXISTS idx_framer_logs_created ON public.framer_logs (created_at DESC);
+
+ALTER TABLE public.framer_logs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "framer logs admin all" ON public.framer_logs;
+CREATE POLICY "framer logs admin all" ON public.framer_logs
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- ── recurring_invoices: terugkerende facturatie-definities (auto per maand) ───
+-- Verschijnen automatisch in elke maand tussen start- en eindmaand. Er worden
+-- GEEN per-maand records aangemaakt; enkel de verstuur-status per maand wordt
+-- bewaard in recurring_invoice_months.
+CREATE TABLE IF NOT EXISTS public.recurring_invoices (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id     uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  service_slug  text,
+  start_month   text NOT NULL,                 -- 'YYYY-MM'
+  end_month     text,                          -- 'YYYY-MM' of NULL (open einde)
+  description   text,
+  amount_excl   numeric NOT NULL DEFAULT 0,
+  vat_pct       numeric NOT NULL DEFAULT 21,
+  amount_incl   numeric NOT NULL DEFAULT 0,
+  active        boolean NOT NULL DEFAULT true,
+  revenue_id    uuid REFERENCES public.revenue_entries(id) ON DELETE SET NULL,
+  created_by    uuid,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.recurring_invoices ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "recurring invoices admin all" ON public.recurring_invoices;
+CREATE POLICY "recurring invoices admin all" ON public.recurring_invoices
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+CREATE TABLE IF NOT EXISTS public.recurring_invoice_months (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  recurring_id  uuid NOT NULL REFERENCES public.recurring_invoices(id) ON DELETE CASCADE,
+  month         text NOT NULL,                 -- 'YYYY-MM'
+  status        text NOT NULL DEFAULT 'verstuurd', -- te_versturen | verstuurd | geannuleerd
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_recurring_invoice_months_uniq ON public.recurring_invoice_months (recurring_id, month);
+ALTER TABLE public.recurring_invoice_months ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "recurring invoice months admin all" ON public.recurring_invoice_months;
+CREATE POLICY "recurring invoice months admin all" ON public.recurring_invoice_months
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS trg_recurring_invoices_updated ON public.recurring_invoices;
+  CREATE TRIGGER trg_recurring_invoices_updated BEFORE UPDATE ON public.recurring_invoices FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+  DROP TRIGGER IF EXISTS trg_recurring_invoice_months_updated ON public.recurring_invoice_months;
+  CREATE TRIGGER trg_recurring_invoice_months_updated BEFORE UPDATE ON public.recurring_invoice_months FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── blog_accounts: zelfstandige blog/Framer-entiteit (optioneel klant-gekoppeld)
+-- Blogs zijn niet langer verplicht aan een klant gekoppeld. Alle blog/Framer-
+-- configuratie verhuist naar blog_accounts; client_id is optioneel.
+CREATE TABLE IF NOT EXISTS public.blog_accounts (
+  id                         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                       text NOT NULL,
+  website_url                text,
+  framer_project_url         text,
+  framer_api_key             text,           -- AES-GCM encrypted
+  framer_blog_collection_id  text,
+  framer_field_map           jsonb,
+  frequentie_maanden         integer NOT NULL DEFAULT 1,
+  aantal_per_cyclus          integer NOT NULL DEFAULT 1,
+  startdatum                 date,
+  volgende_generatie_datum   date,
+  max_live_blogs             integer,
+  briefing                   text,
+  active                     boolean NOT NULL DEFAULT true,
+  client_id                  uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  framer_last_sync           timestamptz,
+  created_by                 uuid,
+  created_at                 timestamptz NOT NULL DEFAULT now(),
+  updated_at                 timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_blog_accounts_client ON public.blog_accounts (client_id);
+
+ALTER TABLE public.blog_accounts ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "blog accounts admin all"  ON public.blog_accounts;
+DROP POLICY IF EXISTS "blog accounts client read" ON public.blog_accounts;
+CREATE POLICY "blog accounts admin all" ON public.blog_accounts
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+CREATE POLICY "blog accounts client read" ON public.blog_accounts
+  FOR SELECT TO authenticated
+  USING (client_id IN (SELECT id FROM public.clients WHERE owner_user_id = auth.uid()));
+
+-- framer_logs kan ook per blogaccount gelogd worden (zonder klant-FK).
+ALTER TABLE public.framer_logs ADD COLUMN IF NOT EXISTS account_id uuid;
+
+-- blogs koppelen aan een blogaccount; client_id wordt optioneel.
+ALTER TABLE public.blogs ADD COLUMN IF NOT EXISTS account_id uuid REFERENCES public.blog_accounts(id) ON DELETE CASCADE;
+DO $$ BEGIN ALTER TABLE public.blogs ALTER COLUMN client_id DROP NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+CREATE INDEX IF NOT EXISTS idx_blogs_account ON public.blogs (account_id);
+
+-- Wie heeft een blog (in het klantenportaal) laatst bewerkt?
+ALTER TABLE public.blogs ADD COLUMN IF NOT EXISTS laatst_bewerkt_door text;
+ALTER TABLE public.blogs ADD COLUMN IF NOT EXISTS laatst_bewerkt_op   timestamptz;
+
+-- Klant mag enkel de blogs van zijn eigen (gekoppelde) blogaccount LEZEN.
+-- Bewerken loopt via de server-API (service role) zodat push-naar-Framer + logging
+-- centraal en gecontroleerd gebeurt.
+DROP POLICY IF EXISTS "blogs client read" ON public.blogs;
+CREATE POLICY "blogs client read" ON public.blogs
+  FOR SELECT TO authenticated
+  USING (client_id IN (SELECT id FROM public.clients WHERE owner_user_id = auth.uid()));
+
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS trg_blog_accounts_updated ON public.blog_accounts;
+  CREATE TRIGGER trg_blog_accounts_updated BEFORE UPDATE ON public.blog_accounts FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── Datamigratie: bestaande klant-bloginstellingen → blogaccounts ─────────────
+-- Idempotent: maakt enkel accounts voor klanten met blogs_inbegrepen die er nog
+-- geen hebben, en koppelt bestaande blogs op basis van client_id.
+DO $$
+BEGIN
+  INSERT INTO public.blog_accounts (name, website_url, framer_project_url, framer_api_key, framer_blog_collection_id, framer_field_map, frequentie_maanden, aantal_per_cyclus, startdatum, volgende_generatie_datum, briefing, active, client_id, framer_last_sync)
+  SELECT c.company_name, c.website_url, c.framer_project_url, c.framer_api_key, c.framer_blog_collection_id, c.framer_field_map,
+         COALESCE(c.blog_frequentie_maanden, 1), COALESCE(c.blog_aantal_per_cyclus, 1), c.blog_startdatum, c.blog_volgende_generatie_datum,
+         c.blog_brand_context, true, c.id, c.framer_last_sync
+  FROM public.clients c
+  WHERE c.blogs_inbegrepen = true
+    AND NOT EXISTS (SELECT 1 FROM public.blog_accounts a WHERE a.client_id = c.id);
+
+  UPDATE public.blogs b
+     SET account_id = a.id
+    FROM public.blog_accounts a
+   WHERE b.account_id IS NULL AND b.client_id IS NOT NULL AND a.client_id = b.client_id;
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ── Blogaccount polish: gecachte website-analyse + blog memory ────────────────
+-- website_analysis: gestructureerde analyse (diensten, SEO-woorden, tone, CTA's,
+-- FAQ's). Wordt NIET elke generatie opnieuw uitgevoerd — enkel bij "opnieuw
+-- analyseren" of wanneer de briefing wijzigt (website_analyzed_at → NULL).
+-- blog_memory: { topics:[], keywords:[], angles:[], ctas:[] } om herhaling te vermijden.
+ALTER TABLE public.blog_accounts ADD COLUMN IF NOT EXISTS website_analysis    jsonb;
+ALTER TABLE public.blog_accounts ADD COLUMN IF NOT EXISTS website_analyzed_at timestamptz;
+ALTER TABLE public.blog_accounts ADD COLUMN IF NOT EXISTS blog_memory         jsonb;
+
+-- ── Blogs: synchronisatiestatus + publicatiebeheer ────────────────────────────
+-- sync_status: synced | pending | failed (NULL = nog niet gepubliceerd)
+-- publish_mode: now | scheduled | auto   publish_at: geplande publicatiedatum
+ALTER TABLE public.blogs ADD COLUMN IF NOT EXISTS sync_status  text;
+ALTER TABLE public.blogs ADD COLUMN IF NOT EXISTS publish_mode text NOT NULL DEFAULT 'now';
+ALTER TABLE public.blogs ADD COLUMN IF NOT EXISTS publish_at   timestamptz;
+
+-- ── blog_versions: volledige versiegeschiedenis per blog ──────────────────────
+CREATE TABLE IF NOT EXISTS public.blog_versions (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  blog_id          uuid NOT NULL REFERENCES public.blogs(id) ON DELETE CASCADE,
+  titel            text,
+  slug             text,
+  content          text,
+  meta_title       text,
+  meta_description text,
+  thumbnail_url    text,
+  edited_by        text,            -- e-mail/identiteit van wie de wijziging deed
+  change_summary   text,            -- korte omschrijving van wat gewijzigd werd
+  created_at       timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_blog_versions_blog ON public.blog_versions (blog_id, created_at DESC);
+
+ALTER TABLE public.blog_versions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "blog versions admin all" ON public.blog_versions;
+CREATE POLICY "blog versions admin all" ON public.blog_versions
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- ── Blog ecosystem automation ─────────────────────────────────────────────────
+-- tags: automatische tagging per blog (SEO, Branding, HR, …)
+ALTER TABLE public.blogs ADD COLUMN IF NOT EXISTS tags text[];
+-- knowledge: kennisbank per account (bedrijfsinfo, FAQ's, tone, termen, verboden
+--   woorden, doelgroep, cases) — door de AI als HOOGSTE prioriteit gebruikt.
+ALTER TABLE public.blog_accounts ADD COLUMN IF NOT EXISTS knowledge jsonb;
+-- website_monitor: { last_checked, signature, changed, details } voor wekelijkse
+--   detectie van websitewijzigingen (heranalyse aanbevolen, niet automatisch).
+ALTER TABLE public.blog_accounts ADD COLUMN IF NOT EXISTS website_monitor jsonb;
+
+-- ── app_state: kleine key/value-store voor systeemvlaggen (bv. laatste cron-run)
+CREATE TABLE IF NOT EXISTS public.app_state (
+  key        text PRIMARY KEY,
+  value      jsonb,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.app_state ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "app state admin all" ON public.app_state;
+CREATE POLICY "app state admin all" ON public.app_state
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- ── Facturatie: factuurdag recurring + ClickUp-koppeling ──────────────────────
+-- invoice_day: op welke dag de recurring factuur valt — 'first' (dag 1),
+--   'mid' (dag 15) of 'last' (laatste dag van de maand, standaard).
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS invoice_day text NOT NULL DEFAULT 'last';
+-- ClickUp-taak-id's zodat we de "Factuur versturen"-taak op Completed kunnen zetten.
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS clickup_task_id text;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS clickup_task_id text;
+
+-- ── AI Contractmodule 2.0: optionele klant, templates, audit ──────────────────
+-- Contract mag zonder klant bestaan (publieke tekenlink / intern).
+DO $$ BEGIN ALTER TABLE public.contracts ALTER COLUMN client_id DROP NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+ALTER TABLE public.contracts
+  ADD COLUMN IF NOT EXISTS contract_type  text,
+  ADD COLUMN IF NOT EXISTS recipient_note text,
+  ADD COLUMN IF NOT EXISTS expires_at     date,
+  ADD COLUMN IF NOT EXISTS template_id    uuid,
+  ADD COLUMN IF NOT EXISTS created_by     uuid;
+
+-- Audit-log uitbreiden (contract_events bestaat al voor 'signed' e.d.).
+ALTER TABLE public.contract_events
+  ADD COLUMN IF NOT EXISTS actor      text,
+  ADD COLUMN IF NOT EXISTS ip_address text,
+  ADD COLUMN IF NOT EXISTS user_agent text,
+  ADD COLUMN IF NOT EXISTS meta       jsonb;
+
+-- Contracttemplates: herbruikbare basiscontracten met AI-gedetecteerde velden.
+CREATE TABLE IF NOT EXISTS public.contract_templates (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name            text NOT NULL,
+  category        text,
+  pdf_path        text,
+  detected_fields jsonb NOT NULL DEFAULT '[]'::jsonb,
+  sig_page        integer NOT NULL DEFAULT 1,
+  sig_x_pct       numeric NOT NULL DEFAULT 5,
+  sig_y_pct       numeric NOT NULL DEFAULT 25,
+  sig_width       numeric NOT NULL DEFAULT 200,
+  sig_height      numeric NOT NULL DEFAULT 60,
+  active          boolean NOT NULL DEFAULT true,
+  created_by      uuid,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.contract_templates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "contract templates admin all" ON public.contract_templates;
+CREATE POLICY "contract templates admin all" ON public.contract_templates
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- ── Subaccounts & rechtenmodel: client_users ─────────────────────────────────
+-- Eén klant kan meerdere portaalgebruikers hebben, elk met eigen rechten (jsonb).
+-- Bestaande hoofdaccounts (clients.owner_user_id) blijven werken zonder rij hier.
+CREATE TABLE IF NOT EXISTS public.client_users (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id     uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  auth_user_id  uuid,                       -- gekoppelde auth.users id (login)
+  name          text,
+  email         text,
+  phone         text,
+  role_label    text,                       -- preset/rol-naam (Eigenaar, Marketing, ...)
+  active        boolean NOT NULL DEFAULT true,
+  permissions   jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  last_login_at timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS client_users_auth_user_id_key ON public.client_users(auth_user_id) WHERE auth_user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS client_users_client_id_idx ON public.client_users(client_id);
+
+ALTER TABLE public.client_users ENABLE ROW LEVEL SECURITY;
+
+-- Admin beheert alles.
+DROP POLICY IF EXISTS "client users admin all" ON public.client_users;
+CREATE POLICY "client users admin all" ON public.client_users
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- Een subaccount mag enkel zijn eigen rij lezen (zelfde auth-user).
+DROP POLICY IF EXISTS "client users self read" ON public.client_users;
+CREATE POLICY "client users self read" ON public.client_users
+  FOR SELECT TO authenticated
+  USING (auth_user_id = auth.uid());
+
+-- ── Contracten: contractduur-type (naast bestaande contract_type) ─────────────
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS duration_type text;
+
+-- ── Contract ↔ facturen koppeling (additief) ──────────────────────────────────
+ALTER TABLE public.contracts
+  ADD COLUMN IF NOT EXISTS expected_invoice_count       integer,
+  ADD COLUMN IF NOT EXISTS invoice_frequency            text,
+  ADD COLUMN IF NOT EXISTS expected_invoice_amount_excl numeric;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS contract_id uuid REFERENCES public.contracts(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_invoices_contract ON public.invoices (contract_id);
+
+-- ── Opdrachten ↔ ClickUp-sync (additief) ──────────────────────────────────────
+ALTER TABLE public.freelancer_assignments
+  ADD COLUMN IF NOT EXISTS clickup_task_id   text,
+  ADD COLUMN IF NOT EXISTS clickup_assignee  text,
+  ADD COLUMN IF NOT EXISTS clickup_synced_at timestamptz;
+
+-- ── Klanten: BTW-nummer ───────────────────────────────────────────────────────
+-- Optioneel; bestaande klanten mogen leeg blijven. Hergebruikt als suggestie in
+-- contracten/facturen/prognose.
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS btw_nummer text;
+
+-- ── Voorwaarden / akkoorden (per-dashboard zichtbaar via rollen) ──────────────
+CREATE TABLE IF NOT EXISTS public.terms (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  title       text NOT NULL,
+  content     text,
+  audiences   text[] NOT NULL DEFAULT '{}',   -- subset van admin|client|partner
+  active      boolean NOT NULL DEFAULT true,
+  created_by  uuid,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.terms ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "terms admin all"   ON public.terms;
+DROP POLICY IF EXISTS "terms read active" ON public.terms;
+CREATE POLICY "terms admin all" ON public.terms
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+-- Ingelogde gebruikers mogen actieve voorwaarden lezen (audience-filtering gebeurt in code).
+CREATE POLICY "terms read active" ON public.terms
+  FOR SELECT TO authenticated USING (active = true);
+
+-- ── Interne werknemers (rol 'employee') met per-module zichtbaarheid ──────────
+-- 'employee' toevoegen aan het app_role-enum — ENKEL als dat enum bestaat.
+-- In deze database is user_roles.role een gewone text-kolom (geen enum); dan is
+-- er niets te doen en mag SYNC_ALL niet crashen op een ontbrekend type. De guard
+-- op pg_type zorgt dat de ALTER daar nooit uitgevoerd wordt. (Werknemer-zijn
+-- wordt sowieso primair uit staff_members afgeleid, niet uit dit enum.)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+    WHERE t.typname = 'app_role' AND n.nspname = 'public'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM pg_enum e
+    JOIN pg_type t ON t.oid = e.enumtypid
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    WHERE t.typname = 'app_role' AND n.nspname = 'public' AND e.enumlabel = 'employee'
+  ) THEN
+    ALTER TYPE public.app_role ADD VALUE 'employee';
+  END IF;
+END$$;
+
+CREATE TABLE IF NOT EXISTS public.staff_members (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  auth_user_id  uuid,
+  name          text,
+  email         text,
+  active        boolean NOT NULL DEFAULT true,
+  permissions   text[] NOT NULL DEFAULT '{}',   -- toegestane admin-modules
+  created_by    uuid,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  last_login_at timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS staff_members_auth_user_id_key ON public.staff_members(auth_user_id) WHERE auth_user_id IS NOT NULL;
+ALTER TABLE public.staff_members ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "staff admin all"  ON public.staff_members;
+DROP POLICY IF EXISTS "staff self read"  ON public.staff_members;
+CREATE POLICY "staff admin all" ON public.staff_members
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+-- Werknemer mag zijn eigen rij lezen (nodig voor de module-check in de resolver).
+CREATE POLICY "staff self read" ON public.staff_members
+  FOR SELECT TO authenticated USING (auth_user_id = auth.uid());
+
+-- ── Metricool-koppeling (read-only overzicht) ────────────────────────────────
+-- Elke app-klant kan aan één Metricool-merk (blogId) gekoppeld worden. Enkel
+-- gekoppelde klanten verschijnen in het Metricool-overzicht en -klantportaal.
+ALTER TABLE public.clients
+  ADD COLUMN IF NOT EXISTS metricool_blog_id     text,
+  ADD COLUMN IF NOT EXISTS metricool_brand_name  text;
+
+-- ── Framer CMS-koppeling (klant beheert website-content via de app) ───────────
+-- Per klant: Framer-project + API-key (server-side geheim) + of de klant het CMS
+-- in de app mag beheren. De API-key wordt NOOIT naar de client-browser gestuurd.
+ALTER TABLE public.clients
+  ADD COLUMN IF NOT EXISTS framer_project_url text,
+  ADD COLUMN IF NOT EXISTS framer_api_key     text,
+  ADD COLUMN IF NOT EXISTS cms_enabled        boolean NOT NULL DEFAULT false;
+
+-- Spiegel van de Framer-CMS-collecties (import + publiceren-model).
+CREATE TABLE IF NOT EXISTS public.cms_collections (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id             uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  framer_collection_id  text NOT NULL,
+  name                  text,
+  slug                  text,
+  fields                jsonb NOT NULL DEFAULT '[]',   -- [{id,name,type,userEditable,...}]
+  client_editable       boolean NOT NULL DEFAULT true, -- mag de klant deze collectie bewerken?
+  item_count            integer NOT NULL DEFAULT 0,
+  synced_at             timestamptz,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS cms_collections_client_framer_key
+  ON public.cms_collections(client_id, framer_collection_id);
+
+-- Spiegel van de items binnen een collectie. status: synced|dirty|new|deleted.
+CREATE TABLE IF NOT EXISTS public.cms_items (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection_id   uuid NOT NULL REFERENCES public.cms_collections(id) ON DELETE CASCADE,
+  framer_item_id  text,                                  -- null = nog niet naar Framer gepusht
+  slug            text,
+  draft           boolean NOT NULL DEFAULT false,
+  field_data      jsonb NOT NULL DEFAULT '{}',           -- { fieldId: value }
+  status          text NOT NULL DEFAULT 'synced',
+  position        integer NOT NULL DEFAULT 0,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS cms_items_collection_idx ON public.cms_items(collection_id);
+CREATE UNIQUE INDEX IF NOT EXISTS cms_items_framer_key
+  ON public.cms_items(collection_id, framer_item_id) WHERE framer_item_id IS NOT NULL;
+
+ALTER TABLE public.cms_collections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cms_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "cms_collections admin" ON public.cms_collections;
+DROP POLICY IF EXISTS "cms_items admin" ON public.cms_items;
+-- Admin beheert alles; klant-toegang loopt via de service-role portaalresolver
+-- (gekeyd op de geverifieerde clientId), niet via RLS.
+CREATE POLICY "cms_collections admin" ON public.cms_collections
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+CREATE POLICY "cms_items admin" ON public.cms_items
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- updated_at-trigger-functie idempotent garanderen (bestaat niet in elke DB).
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+RETURNS TRIGGER LANGUAGE plpgsql AS $func$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$func$;
+
+DO $$ BEGIN
+  CREATE TRIGGER trg_cms_collections_updated BEFORE UPDATE ON public.cms_collections FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TRIGGER trg_cms_items_updated BEFORE UPDATE ON public.cms_items FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ── Website-platform + onderhoud ─────────────────────────────────────────────
+-- Per klant leggen we intern vast HOE de website gebouwd is (framer | custom) en
+-- of er onderhoud loopt. Dit is puur interne administratie: de klant ziet nooit
+-- het platform, enkel de functies die eruit volgen (CMS beheren of een knop naar
+-- zijn beheerplatform).
+ALTER TABLE public.clients
+  ADD COLUMN IF NOT EXISTS website_platform             text,     -- 'framer' | 'custom'
+  ADD COLUMN IF NOT EXISTS website_admin_url            text,     -- beheerplatform (custom code)
+  ADD COLUMN IF NOT EXISTS maintenance_included         boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS maintenance_start_date       date,
+  ADD COLUMN IF NOT EXISTS maintenance_months           integer NOT NULL DEFAULT 12,
+  -- Einddatum waarvoor de herinneringsmail al verstuurd is → nooit dubbel mailen.
+  ADD COLUMN IF NOT EXISTS maintenance_reminder_sent_for date;
+
+CREATE INDEX IF NOT EXISTS idx_clients_maintenance
+  ON public.clients (maintenance_start_date) WHERE maintenance_included;
+
+-- ── Tweestapsverificatie voor interne accounts ───────────────────────────────
+-- Admins en werknemers loggen in met wachtwoord + een code per e-mail.
+-- De code wordt NOOIT leesbaar bewaard: enkel een SHA-256-hash.
+-- BEWUST GEEN RLS-policies: alleen de service-role (server) mag hierbij.
+CREATE TABLE IF NOT EXISTS public.login_codes (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     uuid NOT NULL,
+  code_hash   text NOT NULL,
+  expires_at  timestamptz NOT NULL,
+  consumed_at timestamptz,
+  attempts    integer NOT NULL DEFAULT 0,
+  ip          text,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_login_codes_user ON public.login_codes (user_id, created_at DESC);
+ALTER TABLE public.login_codes ENABLE ROW LEVEL SECURITY;
+
+-- ── Security: leesbare wachtwoorden verwijderen ──────────────────────────────
+-- clients.login_password / freelancers.login_password bewaarden het door de
+-- admin ingestelde wachtwoord in KLARE TEKST, puur om het later te kunnen tonen.
+-- Supabase Auth bewaart het echte wachtwoord al gehasht; deze kopie was dus
+-- overbodig en zou bij een datalek alle klant- en partnerwachtwoorden prijsgeven
+-- (die mensen vaak hergebruiken). Eerst overschrijven, dan de kolom weghalen.
+UPDATE public.clients     SET login_password = NULL WHERE login_password IS NOT NULL;
+UPDATE public.freelancers SET login_password = NULL WHERE login_password IS NOT NULL;
+ALTER TABLE public.clients     DROP COLUMN IF EXISTS login_password;
+ALTER TABLE public.freelancers DROP COLUMN IF EXISTS login_password;
+
+-- ── Rate limiting (brute-force-rem op inloggen en codes) ─────────────────────
+-- Eén rij per poging; de code telt de rijen binnen een tijdvenster.
+-- BEWUST GEEN RLS-policies: alleen de service-role (server) schrijft hierin.
+-- Bevat geen persoonsgegevens: de sleutel is 'actie:ip', geen e-mailadres.
+CREATE TABLE IF NOT EXISTS public.rate_limit_hits (
+  id         bigserial PRIMARY KEY,
+  key        text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_rate_limit_key_time ON public.rate_limit_hits (key, created_at DESC);
+ALTER TABLE public.rate_limit_hits ENABLE ROW LEVEL SECURITY;
+
+-- ── Done ──────────────────────────────────────────────────────────────────────
+-- Alle kolommen, tabellen, policies en triggers staan nu in sync met de code.
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  MODULE VERKOOP — appointment setting + pipeline
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Wij bellen prospects namens een KLANT en boeken afspraken in diens agenda.
+-- Alles is strikt per klant gescheiden. Deze klant staat LOS van public.clients
+-- (portaalklanten): een belklant heeft geen login, contracten of diensten.
+-- Is het toevallig dezelfde partij, dan koppelt portal_client_id ze.
+
+CREATE EXTENSION IF NOT EXISTS btree_gist;   -- nodig voor de overlap-constraint
+
+-- ── Klant waarvoor wij bellen ────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.sales_clients (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                 text NOT NULL,
+  contact_name         text,
+  contact_email        text,
+  phone                text,
+  status               text NOT NULL DEFAULT 'active',   -- active | paused | archived
+  timezone             text NOT NULL DEFAULT 'Europe/Brussels',
+  -- Boekingsregels (§8) — bewust platte kolommen, geen "meeting types".
+  buffer_before_min    integer NOT NULL DEFAULT 0,
+  buffer_after_min     integer NOT NULL DEFAULT 0,
+  min_notice_min       integer NOT NULL DEFAULT 60,   -- min. opzegtermijn
+  max_horizon_days     integer NOT NULL DEFAULT 60,   -- max. vooruit boeken
+  max_per_day          integer NOT NULL DEFAULT 8,
+  slot_interval_min    integer NOT NULL DEFAULT 30,   -- raster voor slepen
+  default_duration_min integer NOT NULL DEFAULT 30,
+  portal_client_id     uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  updated_at           timestamptz NOT NULL DEFAULT now()
+);
+
+-- ── Bedrijven en contactpersonen ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.sales_companies (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sales_client_id uuid NOT NULL REFERENCES public.sales_clients(id) ON DELETE CASCADE,
+  name            text NOT NULL,
+  website         text,
+  -- Ontdubbelsleutel: website-host, anders de genormaliseerde naam (§11).
+  dedupe_key      text NOT NULL,
+  sector          text,
+  employees       integer,
+  city            text,
+  region          text,
+  country         text,
+  phone           text,
+  linkedin        text,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+-- Nooit twee bedrijven met dezelfde sleutel bij dezelfde klant.
+CREATE UNIQUE INDEX IF NOT EXISTS sales_companies_dedupe
+  ON public.sales_companies (sales_client_id, dedupe_key);
+
+CREATE TABLE IF NOT EXISTS public.sales_contacts (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id   uuid NOT NULL REFERENCES public.sales_companies(id) ON DELETE CASCADE,
+  name         text,
+  role         text,
+  email        text,
+  phone        text,
+  mobile       text,
+  linkedin     text,
+  -- Cijfer-genormaliseerd nummer, zodat +32470…, 0470… en 470… allemaal op
+  -- hetzelfde zoekresultaat uitkomen (§4).
+  phone_digits text,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sales_contacts_phone ON public.sales_contacts (phone_digits);
+
+-- ── Pipeline-fases (per klant dezelfde vaste set, zie §3) ────────────────────
+CREATE TABLE IF NOT EXISTS public.sales_stages (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sales_client_id uuid NOT NULL REFERENCES public.sales_clients(id) ON DELETE CASCADE,
+  key             text NOT NULL,     -- stabiele sleutel, zie lib/sales/stages.ts
+  label           text NOT NULL,
+  position        integer NOT NULL,
+  is_won          boolean NOT NULL DEFAULT false,
+  is_lost         boolean NOT NULL DEFAULT false
+);
+CREATE UNIQUE INDEX IF NOT EXISTS sales_stages_key ON public.sales_stages (sales_client_id, key);
+
+-- ── Leads ────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.sales_leads (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sales_client_id    uuid NOT NULL REFERENCES public.sales_clients(id) ON DELETE CASCADE,
+  company_id         uuid NOT NULL REFERENCES public.sales_companies(id) ON DELETE CASCADE,
+  contact_id         uuid REFERENCES public.sales_contacts(id) ON DELETE SET NULL,
+  stage_key          text NOT NULL DEFAULT 'to_contact',
+  source             text NOT NULL DEFAULT 'manual',
+  assigned_to        uuid,                       -- setter (auth user)
+  labels             text[] NOT NULL DEFAULT '{}',
+  callback_at        timestamptz,                -- terugbellen op
+  archived_at        timestamptz,                -- zacht verwijderen, nooit hard
+  lost_reason        text,
+  do_not_call        boolean NOT NULL DEFAULT false,
+  do_not_call_reason text,
+  email_brief        text,                       -- briefing voor de klant (§4)
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+-- Eén actieve lead per bedrijf per klant (§11). Gearchiveerde tellen niet mee.
+-- De index zelf staat verderop: hij is een tijdlang per pipeline geweest en is
+-- daarna teruggezet naar per bedrijf. Hier aanmaken zou die geschiedenis in de
+-- verkeerde volgorde afspelen.
+CREATE INDEX IF NOT EXISTS sales_leads_stage    ON public.sales_leads (sales_client_id, stage_key);
+CREATE INDEX IF NOT EXISTS sales_leads_callback ON public.sales_leads (callback_at) WHERE callback_at IS NOT NULL;
+
+-- ── Historiek per lead: belpogingen, notities, fasewissels ───────────────────
+CREATE TABLE IF NOT EXISTS public.sales_lead_events (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id     uuid NOT NULL REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  kind        text NOT NULL,           -- call | note | stage | system
+  body        text,
+  from_stage  text,
+  to_stage    text,
+  actor_id    uuid,
+  actor_email text,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sales_lead_events_lead ON public.sales_lead_events (lead_id, created_at DESC);
+
+-- ── Beschikbaarheid ──────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.sales_availability_rules (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sales_client_id uuid NOT NULL REFERENCES public.sales_clients(id) ON DELETE CASCADE,
+  weekday         smallint NOT NULL,   -- 0 = maandag … 6 = zondag
+  start_time      time NOT NULL,
+  end_time        time NOT NULL,
+  CONSTRAINT sales_avail_range CHECK (end_time > start_time)
+);
+CREATE INDEX IF NOT EXISTS sales_avail_client ON public.sales_availability_rules (sales_client_id, weekday);
+
+CREATE TABLE IF NOT EXISTS public.sales_availability_exceptions (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sales_client_id uuid NOT NULL REFERENCES public.sales_clients(id) ON DELETE CASCADE,
+  date            date NOT NULL,
+  closed          boolean NOT NULL DEFAULT true,   -- true = hele dag dicht
+  start_time      time,                            -- anders: afwijkende uren
+  end_time        time,
+  note            text
+);
+-- (vervallen) sales_avail_exc_day — één uitzondering per dag per klant — is
+-- verderop GEDROPT toen uitzonderingen per agenda gingen gelden. Opnieuw
+-- aanmaken zou een rerun laten falen bij bv. een feestdag in beide agenda's.
+
+-- ── Agendakoppeling (provider-agnostisch: google nu, clickup later) ──────────
+CREATE TABLE IF NOT EXISTS public.sales_calendar_connections (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sales_client_id  uuid NOT NULL REFERENCES public.sales_clients(id) ON DELETE CASCADE,
+  provider         text NOT NULL DEFAULT 'google',
+  account_email    text,
+  calendar_id      text,                 -- agenda waarin we schrijven
+  access_token     text,                 -- VERSLEUTELD (lib/crypto.ts)
+  refresh_token    text,                 -- VERSLEUTELD
+  token_expires_at timestamptz,
+  status           text NOT NULL DEFAULT 'connected',
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now()
+);
+-- (vervallen) sales_calconn_client — één agenda per provider per klant — is
+-- verderop GEDROPT toen meerdere agenda's de kernfeature werden. Hem hier
+-- opnieuw aanmaken zou een rerun laten falen zodra Bram én Marco allebei
+-- Google gebruiken; daarom staat hier enkel nog deze verwijzing.
+
+-- ── Afspraken ────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.sales_appointments (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sales_client_id   uuid NOT NULL REFERENCES public.sales_clients(id) ON DELETE CASCADE,
+  lead_id           uuid REFERENCES public.sales_leads(id) ON DELETE SET NULL,
+  contact_id        uuid REFERENCES public.sales_contacts(id) ON DELETE SET NULL,
+  setter_id         uuid,
+  starts_at         timestamptz NOT NULL,
+  ends_at           timestamptz NOT NULL,
+  status            text NOT NULL DEFAULT 'scheduled',  -- scheduled|completed|no_show|cancelled
+  notes             text,
+  client_note       text,
+  attendee_email    text,
+  meet_url          text,
+  external_event_id text,                -- Google-event
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT sales_appt_range CHECK (ends_at > starts_at)
+);
+-- Dubbele boeking is ONMOGELIJK: twee niet-geannuleerde afspraken van dezelfde
+-- klant mogen elkaar nooit overlappen. Dit is de laatste verdedigingslinie,
+-- naast de hervalidatie in de code (§11).
+DO $sales$ BEGIN
+  ALTER TABLE public.sales_appointments
+    ADD CONSTRAINT sales_appt_no_overlap
+    EXCLUDE USING gist (
+      sales_client_id WITH =,
+      tstzrange(starts_at, ends_at, '[)') WITH &&
+    ) WHERE (status <> 'cancelled');
+EXCEPTION WHEN duplicate_object THEN NULL; WHEN duplicate_table THEN NULL; END $sales$;
+CREATE INDEX IF NOT EXISTS sales_appt_window
+  ON public.sales_appointments (sales_client_id, starts_at) WHERE status <> 'cancelled';
+
+-- ── RLS: admin-only; de app werkt server-side via de service-role ────────────
+ALTER TABLE public.sales_clients                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_companies               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_contacts                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_stages                  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_leads                   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_lead_events             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_availability_rules      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_availability_exceptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_calendar_connections    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_appointments            ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "sales_clients admin all"      ON public.sales_clients;
+CREATE POLICY "sales_clients admin all" ON public.sales_clients FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DROP POLICY IF EXISTS "sales_companies admin all"    ON public.sales_companies;
+CREATE POLICY "sales_companies admin all" ON public.sales_companies FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DROP POLICY IF EXISTS "sales_contacts admin all"     ON public.sales_contacts;
+CREATE POLICY "sales_contacts admin all" ON public.sales_contacts FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DROP POLICY IF EXISTS "sales_stages admin all"       ON public.sales_stages;
+CREATE POLICY "sales_stages admin all" ON public.sales_stages FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DROP POLICY IF EXISTS "sales_leads admin all"        ON public.sales_leads;
+CREATE POLICY "sales_leads admin all" ON public.sales_leads FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DROP POLICY IF EXISTS "sales_lead_events admin all"  ON public.sales_lead_events;
+CREATE POLICY "sales_lead_events admin all" ON public.sales_lead_events FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DROP POLICY IF EXISTS "sales_avail_rules admin all"  ON public.sales_availability_rules;
+CREATE POLICY "sales_avail_rules admin all" ON public.sales_availability_rules FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DROP POLICY IF EXISTS "sales_avail_exc admin all"    ON public.sales_availability_exceptions;
+CREATE POLICY "sales_avail_exc admin all" ON public.sales_availability_exceptions FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- Tokens: GEEN policy — enkel de service-role (server) mag hierbij.
+DROP POLICY IF EXISTS "sales_calconn admin all"      ON public.sales_calendar_connections;
+
+DROP POLICY IF EXISTS "sales_appointments admin all" ON public.sales_appointments;
+CREATE POLICY "sales_appointments admin all" ON public.sales_appointments FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- updated_at-triggers
+DO $sales$ BEGIN
+  CREATE TRIGGER trg_sales_clients_updated BEFORE UPDATE ON public.sales_clients
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $sales$;
+DO $sales$ BEGIN
+  CREATE TRIGGER trg_sales_companies_updated BEFORE UPDATE ON public.sales_companies
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $sales$;
+DO $sales$ BEGIN
+  CREATE TRIGGER trg_sales_contacts_updated BEFORE UPDATE ON public.sales_contacts
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $sales$;
+DO $sales$ BEGIN
+  CREATE TRIGGER trg_sales_leads_updated BEFORE UPDATE ON public.sales_leads
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $sales$;
+DO $sales$ BEGIN
+  CREATE TRIGGER trg_sales_calconn_updated BEFORE UPDATE ON public.sales_calendar_connections
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $sales$;
+DO $sales$ BEGIN
+  CREATE TRIGGER trg_sales_appointments_updated BEFORE UPDATE ON public.sales_appointments
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $sales$;
+
+-- ── Herinneringsmails naar prospects (§8, optioneel per klant) ───────────────
+-- BEWUST OPT-IN: standaard een lege lijst = geen enkele automatische mail.
+-- Dat sluit aan bij de platformregel dat er nooit ongevraagd mail uitgaat; de
+-- admin zet dit per klant expliciet aan in het beschikbaarheidsscherm.
+ALTER TABLE public.sales_clients
+  ADD COLUMN IF NOT EXISTS reminder_days_before integer[] NOT NULL DEFAULT '{}',
+  -- Ondertekening van de mail: de prospect hoort de KLANT te zien, niet ons.
+  ADD COLUMN IF NOT EXISTS reminder_sender_name text;
+
+-- Eén rij per verstuurde herinnering, zodat een dagelijkse cron nooit dubbel mailt.
+CREATE TABLE IF NOT EXISTS public.sales_appointment_reminders (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  appointment_id uuid NOT NULL REFERENCES public.sales_appointments(id) ON DELETE CASCADE,
+  days_before    integer NOT NULL,
+  sent_at        timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS sales_appt_reminder_once
+  ON public.sales_appointment_reminders (appointment_id, days_before);
+
+ALTER TABLE public.sales_appointment_reminders ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "sales_appt_reminders admin all" ON public.sales_appointment_reminders;
+CREATE POLICY "sales_appt_reminders admin all" ON public.sales_appointment_reminders FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- ── Meerdere agenda's per klant (Bram, Marco, …) ────────────────────────────
+-- Tot nu had een klant één agenda. Nu kan één klant meerdere agenda's hebben,
+-- elk van een persoon, met eigen werkuren. Een setter kiest bij het boeken
+-- eerst de persoon en sleept dan in diens agenda.
+--
+-- Volledig terugwaarts compatibel: bestaande rijen hebben calendar_id NULL en
+-- blijven werken als "geldt voor de hele klant".
+
+ALTER TABLE public.sales_calendar_connections
+  ADD COLUMN IF NOT EXISTS name   text,               -- 'Bram', 'Marco'
+  ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS color  text;               -- kleur van de blokjes
+
+-- De oude regel liet maar één agenda per klant toe.
+DROP INDEX IF EXISTS public.sales_calconn_client;
+-- Wel: nooit twee keer dezelfde Google-agenda binnen dezelfde klant.
+-- LET OP: deze index is verderop VERVANGEN door sales_calconn_unique_cal_merk
+-- (één rij per account PER MERK). Hem hier opnieuw aanmaken zou falen zodra
+-- één account voor twee merken gekoppeld is — en dan is dit hele bestand niet
+-- meer herdraaibaar. Daarom staat hier enkel nog de verwijzing; de echte index
+-- staat bij het blok "Vier agenda's, twee merken".
+
+-- Werkuren en uitzonderingen mogen nu per agenda gelden.
+-- NULL = geldt voor de hele klant (en dus voor elke agenda zonder eigen uren).
+ALTER TABLE public.sales_availability_rules
+  ADD COLUMN IF NOT EXISTS calendar_id uuid REFERENCES public.sales_calendar_connections(id) ON DELETE CASCADE;
+ALTER TABLE public.sales_availability_exceptions
+  ADD COLUMN IF NOT EXISTS calendar_id uuid REFERENCES public.sales_calendar_connections(id) ON DELETE CASCADE;
+
+-- De uitzondering-per-dag was uniek per klant; dat moet nu per agenda kunnen.
+DROP INDEX IF EXISTS public.sales_avail_exc_day;
+CREATE UNIQUE INDEX IF NOT EXISTS sales_avail_exc_day_cal
+  ON public.sales_availability_exceptions (sales_client_id, COALESCE(calendar_id, '00000000-0000-0000-0000-000000000000'::uuid), date);
+
+-- In welke agenda staat de afspraak?
+ALTER TABLE public.sales_appointments
+  ADD COLUMN IF NOT EXISTS calendar_id uuid REFERENCES public.sales_calendar_connections(id) ON DELETE SET NULL;
+
+-- Dubbele boeking moet PER AGENDA gelden: Bram en Marco mogen tegelijk een
+-- afspraak hebben, dezelfde persoon niet twee keer. COALESCE zorgt dat oude
+-- rijen zonder agenda elkaar nog steeds blokkeren (NULL = NULL geldt niet in
+-- een exclusion-constraint, een vaste sentinel wél).
+ALTER TABLE public.sales_appointments DROP CONSTRAINT IF EXISTS sales_appt_no_overlap;
+DO $sales$ BEGIN
+  ALTER TABLE public.sales_appointments
+    ADD CONSTRAINT sales_appt_no_overlap
+    EXCLUDE USING gist (
+      sales_client_id WITH =,
+      (COALESCE(calendar_id, '00000000-0000-0000-0000-000000000000'::uuid)) WITH =,
+      tstzrange(starts_at, ends_at, '[)') WITH &&
+    ) WHERE (status <> 'cancelled');
+EXCEPTION WHEN duplicate_object THEN NULL; WHEN duplicate_table THEN NULL; END $sales$;
+
+CREATE INDEX IF NOT EXISTS sales_appt_calendar
+  ON public.sales_appointments (calendar_id, starts_at) WHERE status <> 'cancelled';
+
+-- Bestaande koppelingen een naam geven zodat ze herkenbaar blijven in de UI.
+UPDATE public.sales_calendar_connections
+   SET name = COALESCE(name, account_email, 'Agenda')
+ WHERE name IS NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- VERKOOP — meerdere Google-agenda's per koppeling meetellen als bezet
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Eén Google-account heeft meestal meerdere agenda's (Marco, Bram, Chiara,
+-- NextGenMedia, ...). Tot nu keken we enkel naar de hoofdagenda, waardoor een
+-- bezet moment in een andere agenda toch wit (boekbaar) bleek.
+--
+-- busy_calendar_ids = welke agenda's van dat account als bezet tellen.
+-- NULL betekent "nog niet gekozen": de code haalt de lijst dan live bij Google
+-- op en gebruikt alle eigen agenda's. Zo werkt het ook vóór deze migratie.
+ALTER TABLE public.sales_calendar_connections
+  ADD COLUMN IF NOT EXISTS busy_calendar_ids text[];
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- VERKOOP — twee pipelines: NextGenMedia en NextGenSolutions
+-- ═══════════════════════════════════════════════════════════════════════════
+-- We bellen voor twee eigen bedrijven. Een lead hoort bij één van beide, en de
+-- afspraak erft dat merk — daar hangt de juiste brochure en afzender aan vast.
+--
+-- Belangrijk: het MERK zit hier, niet in sales_clients. Die rij blijft de
+-- organisatie (agenda's van Bram en Marco, werkuren, boekingsregels), want die
+-- zijn gedeeld. Twee aparte sales_clients zou betekenen dat Bram voor beide
+-- merken los geboekt kan worden — en dus dubbel bezet raakt.
+
+CREATE TABLE IF NOT EXISTS public.sales_pipelines (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sales_client_id      uuid NOT NULL REFERENCES public.sales_clients(id) ON DELETE CASCADE,
+  key                  text NOT NULL,      -- 'nextgenmedia' | 'nextgensolutions'
+  name                 text NOT NULL,
+  position             integer NOT NULL DEFAULT 1,
+  -- Herinneringsmail (dag vooraf) per merk.
+  reminder_enabled     boolean NOT NULL DEFAULT true,
+  brochure_url         text,               -- bijlage; publieke URL
+  brochure_filename    text,
+  reminder_from        text,               -- afzender, bv. 'NextGenSolutions <info@…>'
+  reminder_reply_to    text,
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  updated_at           timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS sales_pipelines_key
+  ON public.sales_pipelines (sales_client_id, key);
+
+-- Waar hoort deze lead / afspraak bij?
+ALTER TABLE public.sales_leads
+  ADD COLUMN IF NOT EXISTS pipeline_id uuid REFERENCES public.sales_pipelines(id) ON DELETE SET NULL;
+ALTER TABLE public.sales_appointments
+  ADD COLUMN IF NOT EXISTS pipeline_id uuid REFERENCES public.sales_pipelines(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS sales_leads_pipeline ON public.sales_leads (pipeline_id, stage_key);
+
+-- De grendel op dubbels staat verderop, bij "Eén lead per bedrijf". Hij is
+-- een tijdlang per pipeline geweest — hetzelfde bedrijf mocht dan zowel bij
+-- NextGenMedia als bij NextGenSolutions staan — en dat is teruggedraaid.
+
+ALTER TABLE public.sales_pipelines ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "sales_pipelines admin all" ON public.sales_pipelines;
+CREATE POLICY "sales_pipelines admin all" ON public.sales_pipelines FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DO $sales$ BEGIN
+  CREATE TRIGGER trg_sales_pipelines_updated BEFORE UPDATE ON public.sales_pipelines
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $sales$;
+
+-- De herinnering kent nu soorten ('day_before'), niet enkel een aantal dagen.
+ALTER TABLE public.sales_appointment_reminders
+  ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'day_before';
+
+-- De herinnering wordt bij Resend INGEPLAND op het exacte verzendmoment (tot
+-- 72 uur vooruit). We bewaren het mail-id zodat een geannuleerde of verplaatste
+-- afspraak zijn herinnering nog kan tegenhouden.
+ALTER TABLE public.sales_appointment_reminders
+  ADD COLUMN IF NOT EXISTS resend_id     text,
+  ADD COLUMN IF NOT EXISTS scheduled_for timestamptz;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- INLOGINSTELLINGEN PER ACCOUNT — tweestapsverificatie aan of uit
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Tweestapsverificatie staat AAN voor elk intern account. Wie ze niet moet
+-- doorlopen, krijgt hier een rij met two_factor_required = false.
+--
+-- Bewust zo geschreven dat de veilige stand de standaard is: geen rij betekent
+-- "code verplicht". Een lege of ontbrekende tabel kan de beveiliging dus nooit
+-- per ongeluk uitschakelen.
+CREATE TABLE IF NOT EXISTS public.login_settings (
+  auth_user_id        uuid PRIMARY KEY,
+  two_factor_required boolean NOT NULL DEFAULT true,
+  note                text,          -- waarom deze uitzondering
+  updated_by          uuid,
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.login_settings ENABLE ROW LEVEL SECURITY;
+-- Alleen admins; de app leest dit sowieso via de service-role.
+DROP POLICY IF EXISTS "login_settings admin all" ON public.login_settings;
+CREATE POLICY "login_settings admin all" ON public.login_settings FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- VERKOOP — e-mailhandtekening per agenda + handmatig ingrijpen op mails
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Onder "Met vriendelijke groeten" hoort de handtekening van de persoon in
+-- wiens agenda de afspraak staat. Blijft dit leeg, dan zoekt de code zelf de
+-- juiste afbeelding op basis van de naam van de agenda (Bram, Marco, ...).
+ALTER TABLE public.sales_calendar_connections
+  ADD COLUMN IF NOT EXISTS signature_image_url text,
+  ADD COLUMN IF NOT EXISTS signature_phone     text,
+  ADD COLUMN IF NOT EXISTS signature_email     text;
+
+-- Een handmatig geannuleerde herinnering. De rij blijft bewust staan: dat is
+-- precies wat verhindert dat het dagelijkse vangnet hem opnieuw inplant.
+ALTER TABLE public.sales_appointment_reminders
+  ADD COLUMN IF NOT EXISTS cancelled_at timestamptz,
+  ADD COLUMN IF NOT EXISTS cancelled_by uuid;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- VERKOOP — appointment setters: uren, commissie en resultaten
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Onze setters werken op uurbasis (standaard € 50/u) plus een commissie op de
+-- waarde van het eerste contract (standaard 7 %). Beide worden per maand
+-- uitbetaald, en dat zijn twee aparte afrekeningen: uren en commissie.
+--
+-- BEDRAGEN IN CENTEN (integer). Bewust geen float: bij geld leidt afronden in
+-- binaire kommagetallen tot bedragen die net niet kloppen, en dit gaat over wat
+-- iemand effectief uitbetaald krijgt.
+
+CREATE TABLE IF NOT EXISTS public.sales_setters (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sales_client_id   uuid NOT NULL REFERENCES public.sales_clients(id) ON DELETE CASCADE,
+  auth_user_id      uuid,                 -- login van de setter (staff_members)
+  name              text NOT NULL,
+  email             text,
+  hourly_rate_cents integer NOT NULL DEFAULT 5000,     -- € 50,00 per uur
+  commission_pct    numeric(5,2) NOT NULL DEFAULT 7.00,
+  active            boolean NOT NULL DEFAULT true,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now()
+);
+-- Eén profiel per login; anders zouden uren over twee profielen versnipperen.
+CREATE UNIQUE INDEX IF NOT EXISTS sales_setters_user
+  ON public.sales_setters (auth_user_id) WHERE auth_user_id IS NOT NULL;
+
+-- ── Gewerkte tijd ────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.sales_time_entries (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  setter_id   uuid NOT NULL REFERENCES public.sales_setters(id) ON DELETE CASCADE,
+  started_at  timestamptz NOT NULL,
+  ended_at    timestamptz,               -- NULL = de timer loopt nog
+  note        text,
+  source      text NOT NULL DEFAULT 'timer',   -- timer | manual
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT sales_time_range CHECK (ended_at IS NULL OR ended_at > started_at)
+);
+-- Nooit twee lopende timers voor dezelfde persoon: anders tikken de uren dubbel.
+CREATE UNIQUE INDEX IF NOT EXISTS sales_time_one_running
+  ON public.sales_time_entries (setter_id) WHERE ended_at IS NULL;
+CREATE INDEX IF NOT EXISTS sales_time_setter_start
+  ON public.sales_time_entries (setter_id, started_at DESC);
+
+-- ── Resultaat van een afspraak ───────────────────────────────────────────────
+-- De commissie wordt bij het vastleggen BEREKEND EN OPGESLAGEN, niet later
+-- opnieuw uitgerekend. Verandert het commissiepercentage volgend jaar, dan mag
+-- dat niets veranderen aan wat er vorig jaar afgesproken was.
+ALTER TABLE public.sales_appointments
+  ADD COLUMN IF NOT EXISTS setter_profile_id uuid REFERENCES public.sales_setters(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS outcome           text,        -- won | lost | NULL
+  ADD COLUMN IF NOT EXISTS outcome_reason    text,
+  ADD COLUMN IF NOT EXISTS deal_value_cents  bigint,
+  ADD COLUMN IF NOT EXISTS commission_cents  bigint,
+  ADD COLUMN IF NOT EXISTS commission_pct    numeric(5,2),
+  ADD COLUMN IF NOT EXISTS outcome_at        timestamptz,
+  ADD COLUMN IF NOT EXISTS outcome_by        uuid;
+CREATE INDEX IF NOT EXISTS sales_appt_setter
+  ON public.sales_appointments (setter_profile_id, starts_at DESC);
+
+-- ── Uitbetalingen: per setter, per maand, per soort ─────────────────────────
+-- 'hours' en 'commission' zijn twee losse afrekeningen, zoals afgesproken.
+CREATE TABLE IF NOT EXISTS public.sales_payouts (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  setter_id    uuid NOT NULL REFERENCES public.sales_setters(id) ON DELETE CASCADE,
+  month        date NOT NULL,            -- altijd de 1e van de maand
+  kind         text NOT NULL,            -- hours | commission
+  amount_cents bigint NOT NULL DEFAULT 0,
+  status       text NOT NULL DEFAULT 'open',   -- open | paid
+  paid_at      timestamptz,
+  paid_by      uuid,
+  note         text,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS sales_payouts_unique
+  ON public.sales_payouts (setter_id, month, kind);
+
+ALTER TABLE public.sales_setters      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_time_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_payouts      ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "sales_setters admin all" ON public.sales_setters;
+CREATE POLICY "sales_setters admin all" ON public.sales_setters FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+DROP POLICY IF EXISTS "sales_time admin all" ON public.sales_time_entries;
+CREATE POLICY "sales_time admin all" ON public.sales_time_entries FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+DROP POLICY IF EXISTS "sales_payouts admin all" ON public.sales_payouts;
+CREATE POLICY "sales_payouts admin all" ON public.sales_payouts FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+DO $sales$ BEGIN
+  CREATE TRIGGER trg_sales_setters_updated BEFORE UPDATE ON public.sales_setters
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $sales$;
+DO $sales$ BEGIN
+  CREATE TRIGGER trg_sales_payouts_updated BEFORE UPDATE ON public.sales_payouts
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $sales$;
+
+-- Opgeschoonde regels in het mailoverzicht. De afspraak zelf blijft ongemoeid;
+-- enkel de regel verdwijnt uit de lijst, en is met één klik weer op te halen.
+ALTER TABLE public.sales_appointments
+  ADD COLUMN IF NOT EXISTS mail_hidden_at timestamptz;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- FACTUREN — inkomende afrekeningen van appointment setters
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Een setter factureert ONS: gewerkte uren en commissie, twee losse facturen
+-- per maand. Ze staan in dezelfde tabel zodat je ze op het facturenscherm ziet,
+-- maar met een `kind` erbij.
+--
+-- KRITISCH: de omzet in Financiën wordt uit deze tabel berekend. Zonder dit
+-- onderscheid zou de kost van een setter als ONZE omzet meetellen. Alles wat
+-- niet 'client' is, blijft daarom buiten de omzet en telt als kost.
+ALTER TABLE public.invoices
+  ADD COLUMN IF NOT EXISTS kind      text NOT NULL DEFAULT 'client',  -- client | setter_hours | setter_commission
+  ADD COLUMN IF NOT EXISTS setter_id uuid,
+  -- 'auto' = door de app bijgehouden; handmatige wijzigingen blijven staan.
+  ADD COLUMN IF NOT EXISTS source    text NOT NULL DEFAULT 'manual';
+
+-- Eén automatische factuur per setter, per maand, per soort.
+CREATE UNIQUE INDEX IF NOT EXISTS invoices_setter_month_kind
+  ON public.invoices (setter_id, invoice_month, kind)
+  WHERE setter_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_invoices_kind ON public.invoices (kind);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- AANBESTEDINGEN — datamodel
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Monitort Belgische overheidsopdrachten (BDA), scoort ze 0–100, leest de
+-- bestekken uit en stelt een dossier samen. De app dient NOOIT zelf in.
+--
+-- "Filter" is wat in de losse voorloper een workspace heette: een bewaarde
+-- zoekopdracht van publicprocurement.be, met een eigenaar. Elke medewerker met
+-- de rol kan er een eigen hebben (advertising, marketing, software, ...).
+
+CREATE TABLE IF NOT EXISTS public.aanbestedingen_filters (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam           text NOT NULL,
+  short_link     text NOT NULL,                    -- bv. 'v2-abc123'
+  include_closed boolean NOT NULL DEFAULT false,   -- ook afgesloten opdrachten?
+  eigenaar       uuid NOT NULL,                    -- auth-gebruiker
+  ai_top_x       integer NOT NULL DEFAULT 25,      -- max volledige analyses per run
+  mail_drempel   integer NOT NULL DEFAULT 70,      -- vanaf welke score "interessant"
+  auto_enabled     boolean NOT NULL DEFAULT false,
+  auto_dagen       integer[] NOT NULL DEFAULT '{1,2,3,4,5,6,7}',  -- 1=ma … 7=zo
+  auto_uur         integer NOT NULL DEFAULT 5,     -- Belgische tijd
+  auto_laatste_run date,                           -- voorkomt dubbel draaien
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS aanbestedingen_filters_eigenaar
+  ON public.aanbestedingen_filters (eigenaar);
+
+CREATE TABLE IF NOT EXISTS public.aanbestedingen (
+  filter_id                    uuid NOT NULL REFERENCES public.aanbestedingen_filters (id) ON DELETE CASCADE,
+  referentienummer             text NOT NULL,
+  dossiernummer                text,
+  titel                        text,
+  beschrijving                 text DEFAULT '',
+  organisatie                  text,
+  cpv_hoofdcode                text,
+  cpv_hoofd_omschrijving       text,
+  cpv_bijkomende_codes         text,
+  aard                         text,
+  procedure                    text,
+  publicatiedatum              date,
+  publicatiedatum_raw          text,
+  uiterste_indieningsdatum     timestamptz,        -- UTC
+  uiterste_indieningsdatum_raw text,               -- originele Belgische tijd
+  status                       text,
+  -- Detailpagina. Het LAATSTE PADSEGMENT is de publicationWorkspaceId die nodig
+  -- is om de bestekdocumenten op te halen — altijd volledig bewaren.
+  link                         text,
+  bron                         text DEFAULT 'BDA',
+  ingediend                    boolean NOT NULL DEFAULT false,
+  ingediend_at                 timestamptz,
+  genegeerd                    boolean NOT NULL DEFAULT false,
+  documenten_opgeruimd_at      timestamptz,
+  record_status                text NOT NULL DEFAULT 'nieuw'
+    CHECK (record_status IN ('nieuw', 'bestaand', 'verdwenen')),
+  first_seen_at                timestamptz NOT NULL DEFAULT now(),
+  last_seen_at                 timestamptz NOT NULL DEFAULT now(),
+  uitkomst       text CHECK (uitkomst IS NULL OR uitkomst IN ('gewonnen','verloren')),
+  uitkomst_op    timestamptz,
+  omzet_bedrag   numeric,
+  verlies_reden  text,
+  verbeterpunten text,
+  PRIMARY KEY (filter_id, referentienummer)
+);
+CREATE INDEX IF NOT EXISTS aanbestedingen_filter_idx   ON public.aanbestedingen (filter_id);
+CREATE INDEX IF NOT EXISTS aanbestedingen_deadline_idx ON public.aanbestedingen (uiterste_indieningsdatum);
+
+CREATE TABLE IF NOT EXISTS public.aanbesteding_analyse (
+  filter_id           uuid NOT NULL,
+  referentienummer    text NOT NULL,
+  score               integer CHECK (score IS NULL OR (score BETWEEN 0 AND 100)),
+  volledig            boolean NOT NULL DEFAULT false,   -- enkel gescoord, of uitgewerkt?
+  kwalificatie_reden  text,
+  uitleg_kort         text,
+  samenvatting        text,
+  plan_van_aanpak     text,
+  gekozen_referenties jsonb,
+  prijs_bedrag        numeric,
+  prijs_type          text,
+  prijs_detail        jsonb,
+  prijs_onderbouwing  text,
+  prijs_bevestigd     boolean NOT NULL DEFAULT false,
+  bestek_status        text,
+  bestek_bronnen       jsonb,
+  bestek_samenvatting  text,
+  selectiecriteria     jsonb,
+  gevraagde_documenten jsonb,
+  gunningscriteria     jsonb,
+  checklist            jsonb,
+  model          text,
+  input_tokens   integer DEFAULT 0,
+  output_tokens  integer DEFAULT 0,
+  kost_usd       numeric DEFAULT 0,
+  content_hash   text,           -- caching: nooit twee keer hetzelfde analyseren
+  gezien_op      timestamptz,    -- NULL = toon de "nieuw"-badge
+  gegenereerd_op timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (filter_id, referentienummer),
+  FOREIGN KEY (filter_id, referentienummer)
+    REFERENCES public.aanbestedingen (filter_id, referentienummer) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS aanbesteding_analyse_score_idx
+  ON public.aanbesteding_analyse (filter_id, score DESC NULLS LAST);
+
+CREATE TABLE IF NOT EXISTS public.aanbesteding_documenten (
+  filter_id        uuid NOT NULL,
+  referentienummer text NOT NULL,
+  version_id       text NOT NULL,
+  filename         text,
+  file_hash        text,          -- hergebruik over opdrachten heen
+  doc_type         text,
+  size_bytes       bigint DEFAULT 0,
+  page_count       integer DEFAULT 0,
+  char_count       integer DEFAULT 0,
+  leesbaar         boolean NOT NULL DEFAULT false,
+  status           text,
+  tekst            text,
+  opgehaald_op     timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (filter_id, referentienummer, version_id),
+  FOREIGN KEY (filter_id, referentienummer)
+    REFERENCES public.aanbestedingen (filter_id, referentienummer) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS aanbesteding_documenten_hash_idx
+  ON public.aanbesteding_documenten (file_hash);
+
+-- ── Kennisbank per filter ───────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.aanbesteding_kennis (
+  filter_id          uuid PRIMARY KEY REFERENCES public.aanbestedingen_filters (id) ON DELETE CASCADE,
+  visie              text DEFAULT '',
+  ondernemingsnummer text DEFAULT '',
+  adres              text DEFAULT '',
+  tekenbevoegde      text DEFAULT '',
+  contact_naam       text DEFAULT '',
+  contact_email      text DEFAULT '',
+  contact_telefoon   text DEFAULT '',
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.aanbesteding_referenties (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  filter_id    uuid NOT NULL REFERENCES public.aanbestedingen_filters (id) ON DELETE CASCADE,
+  klant        text DEFAULT '',
+  wat_we_deden text DEFAULT '',
+  resultaat    text DEFAULT '',
+  sector_type  text DEFAULT '',
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.aanbesteding_tarieven (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  filter_id  uuid NOT NULL REFERENCES public.aanbestedingen_filters (id) ON DELETE CASCADE,
+  dienst     text NOT NULL,
+  tarief     numeric(12,2) NOT NULL,
+  eenheid    text NOT NULL DEFAULT 'uur',
+  opmerking  text DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.aanbesteding_kennisdocumenten (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  filter_id    uuid NOT NULL REFERENCES public.aanbestedingen_filters (id) ON DELETE CASCADE,
+  name         text NOT NULL,
+  storage_path text NOT NULL,
+  size_bytes   bigint DEFAULT 0,
+  mime         text DEFAULT '',
+  kind         text NOT NULL DEFAULT 'portfolio',   -- 'portfolio' | 'prijslijst'
+  tekst        text,
+  tekst_status text,
+  tekst_op     timestamptz,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+-- ── Runs (voedt de live voortgangsbalk) ─────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.aanbesteding_runs (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  filter_id        uuid NOT NULL REFERENCES public.aanbestedingen_filters (id) ON DELETE CASCADE,
+  status           text NOT NULL DEFAULT 'aangevraagd'
+    CHECK (status IN ('aangevraagd','bezig','klaar','mislukt')),
+  fase             text DEFAULT '',
+  stap_nu          integer NOT NULL DEFAULT 0,
+  stap_totaal      integer NOT NULL DEFAULT 0,
+  omschrijving     text DEFAULT '',
+  resultaat        text DEFAULT '',
+  aangevraagd_door text DEFAULT '',
+  aangevraagd_op   timestamptz NOT NULL DEFAULT now(),
+  gestart_op       timestamptz,
+  klaar_op         timestamptz
+);
+CREATE INDEX IF NOT EXISTS aanbesteding_runs_filter_idx
+  ON public.aanbesteding_runs (filter_id, aangevraagd_op DESC);
+
+-- ── RLS: admin-only; de app leest server-side via de service-role ───────────
+-- De kennisbank bevat tarieven en verliesredenen, dus commercieel gevoelige
+-- informatie. Dat een medewerker zijn EIGEN filter mag zien, regelen de guards
+-- in de app — niet een ruimere policy hier.
+ALTER TABLE public.aanbestedingen_filters        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.aanbestedingen                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.aanbesteding_analyse          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.aanbesteding_documenten       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.aanbesteding_kennis           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.aanbesteding_referenties      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.aanbesteding_tarieven         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.aanbesteding_kennisdocumenten ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.aanbesteding_runs             ENABLE ROW LEVEL SECURITY;
+
+DO $aanb$
+DECLARE
+  t text;
+  polnaam text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'aanbestedingen_filters','aanbestedingen','aanbesteding_analyse',
+    'aanbesteding_documenten','aanbesteding_kennis','aanbesteding_referenties',
+    'aanbesteding_tarieven','aanbesteding_kennisdocumenten','aanbesteding_runs'
+  ] LOOP
+    polnaam := t || ' admin all';
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', polnaam, t);
+    EXECUTE format(
+      'CREATE POLICY %I ON public.%I FOR ALL TO authenticated '
+      'USING (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = ''admin'')) '
+      'WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = ''admin''))',
+      polnaam, t);
+  END LOOP;
+END $aanb$;
+
+DO $aanb$ BEGIN
+  CREATE TRIGGER trg_aanbestedingen_filters_updated BEFORE UPDATE ON public.aanbestedingen_filters
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $aanb$;
+
+DO $aanb$ BEGIN
+  CREATE TRIGGER trg_aanbesteding_kennis_updated BEFORE UPDATE ON public.aanbesteding_kennis
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $aanb$;
+
+-- ── Aanbestedingen: workspaces zonder werknemer ─────────────────────────────
+-- Een workspace (bv. "Software & IT", "Marketing") wordt in de module zelf
+-- aangemaakt en hoeft niet aan een werknemer te hangen. Hangt er niemand aan,
+-- dan zien enkel de beheerders hem en gaan de mails naar info@nextgenmedia.be.
+-- Daarom mag `eigenaar` leeg zijn. Bestaande rijen blijven ongemoeid.
+DO $aanb$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name  = 'aanbestedingen_filters'
+      AND column_name = 'eigenaar'
+      AND is_nullable = 'NO'
+  ) THEN
+    ALTER TABLE public.aanbestedingen_filters ALTER COLUMN eigenaar DROP NOT NULL;
+  END IF;
+END $aanb$;
+
+-- ── Aanbestedingen: runs kunnen geannuleerd worden ──────────────────────────
+-- Ophalen, beoordelen en uitwerken lopen als één lange aanvraag. Het venster
+-- sluiten stopt die niet; daarom vragen we het annuleren via een vlag in de
+-- database en kijkt de lopende run daar tussen twee stappen naar.
+ALTER TABLE public.aanbesteding_runs
+  ADD COLUMN IF NOT EXISTS annuleren_gevraagd boolean NOT NULL DEFAULT false;
+
+-- 'geannuleerd' toevoegen aan de toegestane statussen. Eerst weg, dan opnieuw:
+-- zo is het herhaalbaar en blijft bestaande data ongemoeid.
+ALTER TABLE public.aanbesteding_runs DROP CONSTRAINT IF EXISTS aanbesteding_runs_status_check;
+ALTER TABLE public.aanbesteding_runs ADD CONSTRAINT aanbesteding_runs_status_check
+  CHECK (status IN ('aangevraagd','bezig','klaar','mislukt','geannuleerd'));
+
+-- Lengte van de uitgelezen tekst apart bewaren. Zonder deze kolom moest het
+-- kennisbankscherm de volledige tekst van elk document ophalen om er enkel de
+-- lengte van te tellen — tot enkele megabytes per schermlading.
+ALTER TABLE public.aanbesteding_kennisdocumenten
+  ADD COLUMN IF NOT EXISTS char_count integer NOT NULL DEFAULT 0;
+
+-- Bestaande rijen bijwerken, één keer.
+UPDATE public.aanbesteding_kennisdocumenten
+   SET char_count = length(tekst)
+ WHERE tekst IS NOT NULL AND char_count = 0;
+
+-- Wanneer is er over deze opdracht gemaild? Zonder dit veld zou elke run
+-- opnieuw over dezelfde opdrachten mailen.
+ALTER TABLE public.aanbesteding_analyse
+  ADD COLUMN IF NOT EXISTS gemaild_op timestamptz;
+
+-- ── Verkoop: bevestigingsbelletje in plaats van een herinneringsmail ────────
+-- We sturen geen herinneringsmail meer naar een prospect. Twee dagen vóór de
+-- afspraak bellen we zelf even: is de uitnodiging aangekomen, staat het nog.
+-- Deze kolommen houden bij wie dat gesprek al gehad heeft, zodat een naam van
+-- de bellijst verdwijnt zodra hij gebeld is.
+ALTER TABLE public.sales_appointments
+  ADD COLUMN IF NOT EXISTS bevestigd_op     timestamptz,
+  ADD COLUMN IF NOT EXISTS bevestigd_door   uuid,
+  ADD COLUMN IF NOT EXISTS bevestig_notitie text;
+
+CREATE INDEX IF NOT EXISTS sales_appointments_bellijst_idx
+  ON public.sales_appointments (starts_at)
+  WHERE bevestigd_op IS NULL;
+
+-- Adres van de afspraak. De closer rijdt ernaartoe, dus dit hoort in het
+-- Google-event als `location` te staan: dan werkt navigeren rechtstreeks vanuit
+-- de agenda. Een adres in de omschrijving verstoppen doet dat niet.
+ALTER TABLE public.sales_appointments
+  ADD COLUMN IF NOT EXISTS adres text;
+
+-- ── Gedeelde database: onze kant dichtzetten ────────────────────────────────
+-- Deze database wordt gedeeld met een tweede applicatie (schema `ngs`). Elke
+-- gebruiker daarvan heeft een geldig token voor DIT project, en komt dus langs
+-- onze RLS. Alles in public is gebonden aan auth.uid() — op één plek na.
+--
+-- `terms read active` gaf leestoegang op `active = true`, zonder enige controle
+-- op wie je bent. Dat was ongevaarlijk toen wij de enige app waren; met een
+-- gedeelde auth.users is het de enige deur waar een vreemde gebruiker door kan.
+DROP POLICY IF EXISTS "terms read active" ON public.terms;
+CREATE POLICY "terms read active" ON public.terms
+  FOR SELECT TO authenticated
+  USING (
+    active = true
+    AND EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid())
+  );
+
+-- ── Framer-sites ────────────────────────────────────────────────────────────
+-- Welke klantwebsites draaien op Framer, wat kosten ze, en wanneer verlengen ze.
+-- `client_id` mag leeg zijn: niet elke site hoort bij een klant die in de app
+-- staat. `naam` is daarom leidend en verplicht.
+--
+-- `renew_op` is een ANKERDATUM, niet "de volgende keer". De eerstvolgende
+-- verlenging wordt eruit berekend, zodat er nooit een datum uit het verleden
+-- blijft staan omdat niemand hem bijwerkte.
+CREATE TABLE IF NOT EXISTS public.framer_sites (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id    uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  naam         text NOT NULL,
+  site_url     text,
+  plan         text,                                   -- vrije tekst: Mini, Basic, Pro…
+  bedrag_excl  numeric(12,2) NOT NULL DEFAULT 0,
+  vat_pct      numeric(5,2)  NOT NULL DEFAULT 21,
+  facturatie   text NOT NULL DEFAULT 'annual'
+    CHECK (facturatie IN ('monthly','annual')),
+  renew_op     date,
+  opgezegd_op  date,                                   -- gestopt; blijft staan voor de historiek
+  notitie      text,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS framer_sites_renew_idx ON public.framer_sites (renew_op)
+  WHERE opgezegd_op IS NULL;
+CREATE INDEX IF NOT EXISTS framer_sites_client_idx ON public.framer_sites (client_id);
+
+ALTER TABLE public.framer_sites ENABLE ROW LEVEL SECURITY;
+
+DO $fr$ BEGIN
+  CREATE POLICY "framer_sites admin all" ON public.framer_sites
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+    WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $fr$;
+
+DO $fr$ BEGIN
+  CREATE TRIGGER trg_framer_sites_updated BEFORE UPDATE ON public.framer_sites
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $fr$;
+
+-- ── MCP-connector: OAuth ────────────────────────────────────────────────────
+-- De connector over HTTP was enkel beveiligd met een sleutel in het adres. Dat
+-- is een gedeeld geheim: wie de URL heeft, heeft toegang. Met OAuth wordt elke
+-- verbinding goedgekeurd door een ingelogde beheerder, en is de URL op zichzelf
+-- waardeloos.
+--
+-- Tokens worden NOOIT als tekst bewaard, alleen als SHA-256. Lekt deze tabel,
+-- dan kan er niemand mee inloggen.
+
+-- Clients registreren zichzelf (RFC 7591). Claude doet dat bij elke nieuwe
+-- verbinding, dus deze tabel groeit; oude rijen mogen weg.
+CREATE TABLE IF NOT EXISTS public.mcp_oauth_clients (
+  client_id     text PRIMARY KEY,
+  client_name   text,
+  redirect_uris text[] NOT NULL DEFAULT '{}',
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+-- Autorisatiecodes: kortlevend en eenmalig.
+CREATE TABLE IF NOT EXISTS public.mcp_oauth_codes (
+  code_hash      text PRIMARY KEY,
+  client_id      text NOT NULL,
+  user_id        uuid NOT NULL,
+  redirect_uri   text NOT NULL,
+  code_challenge text NOT NULL,          -- PKCE, altijd S256
+  scope          text NOT NULL DEFAULT 'mcp',
+  expires_at     timestamptz NOT NULL,
+  used_at        timestamptz,            -- hergebruik is een aanval, geen vergissing
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.mcp_oauth_tokens (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  access_token_hash  text UNIQUE NOT NULL,
+  refresh_token_hash text UNIQUE,
+  client_id          text NOT NULL,
+  user_id            uuid NOT NULL,
+  scope              text NOT NULL DEFAULT 'mcp',
+  expires_at         timestamptz NOT NULL,
+  revoked_at         timestamptz,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  last_used_at       timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS mcp_oauth_tokens_refresh_idx
+  ON public.mcp_oauth_tokens (refresh_token_hash) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS mcp_oauth_tokens_user_idx
+  ON public.mcp_oauth_tokens (user_id) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS mcp_oauth_codes_verval_idx
+  ON public.mcp_oauth_codes (expires_at);
+
+-- Alles dicht: deze tabellen worden uitsluitend server-side gelezen en
+-- geschreven. Er is geen enkele reden voor een gebruiker om erbij te kunnen.
+ALTER TABLE public.mcp_oauth_clients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.mcp_oauth_codes   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.mcp_oauth_tokens  ENABLE ROW LEVEL SECURITY;
+
+-- ── Klantuploads ("dropbox") ────────────────────────────────────────────────
+-- Klanten leveren zelf beeldmateriaal aan, met een titel en een beschrijving
+-- erbij. Bewust een EIGEN tabel en geen kolom bij social content: op het moment
+-- van uploaden weet niemand nog bij welke post het hoort. Koppelen kan later.
+CREATE TABLE IF NOT EXISTS public.client_uploads (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id     uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  titel         text NOT NULL,
+  beschrijving  text,
+  -- Pad in de bucket. Begint ALTIJD met het client_id, zodat een pad nooit naar
+  -- het materiaal van een andere klant kan wijzen.
+  bestandspad   text NOT NULL,
+  bestandsnaam  text NOT NULL,
+  mimetype      text,
+  grootte       bigint,
+  -- Wie leverde dit aan? Een klant kan meerdere subaccounts hebben.
+  door_email    text,
+  door_naam     text,
+  auth_user_id  uuid,
+  -- nieuw → gezien → verwerkt. Zo blijft zichtbaar wat nog aandacht nodig heeft.
+  status        text NOT NULL DEFAULT 'nieuw',
+  admin_notitie text,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS client_uploads_client_idx
+  ON public.client_uploads (client_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS client_uploads_status_idx
+  ON public.client_uploads (status) WHERE status = 'nieuw';
+
+-- Zoals de rest van het portaal: lezen en schrijven gebeurt server-side met de
+-- service-role, ná het oplossen van de sessie. RLS staat aan als tweede laag.
+ALTER TABLE public.client_uploads ENABLE ROW LEVEL SECURITY;
+
+-- Privébucket. Nooit publiek: het gaat om materiaal van klanten, dat alleen via
+-- een tijdelijke ondertekende link zichtbaar hoort te zijn.
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('client-uploads', 'client-uploads', false)
+ON CONFLICT (id) DO NOTHING;
+
+-- ── Mappen bij klantuploads ─────────────────────────────────────────────────
+-- Klanten leveren zelden één foto aan; het is een reeks van een shoot, een
+-- pand, een evenement. Zonder mappen wordt dat één lange stroom waarin niemand
+-- meer terugvindt wat bij elkaar hoort.
+CREATE TABLE IF NOT EXISTS public.client_upload_folders (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id    uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  naam         text NOT NULL,
+  beschrijving text,
+  door_naam    text,
+  door_email   text,
+  auth_user_id uuid,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+-- Twee mappen met dezelfde naam bij één klant is altijd een vergissing, en je
+-- merkt het pas als je in de verkeerde zoekt. Hoofdletterongevoelig, want
+-- "Gevel" en "gevel" zijn voor een mens dezelfde map.
+CREATE UNIQUE INDEX IF NOT EXISTS client_upload_folders_naam_uniek
+  ON public.client_upload_folders (client_id, lower(naam));
+CREATE INDEX IF NOT EXISTS client_upload_folders_client_idx
+  ON public.client_upload_folders (client_id, created_at DESC);
+
+ALTER TABLE public.client_upload_folders ENABLE ROW LEVEL SECURITY;
+
+-- LET OP: ON DELETE SET NULL, bewust NIET CASCADE. Een map weggooien mag nooit
+-- het beeldmateriaal van een klant meenemen; de bestanden komen dan gewoon
+-- weer bij de losse bestanden te staan.
+ALTER TABLE public.client_uploads
+  ADD COLUMN IF NOT EXISTS map_id uuid REFERENCES public.client_upload_folders(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS client_uploads_map_idx
+  ON public.client_uploads (map_id) WHERE map_id IS NOT NULL;
+
+-- ── Contractstatus: constraint gelijktrekken met wat de app schrijft ─────────
+-- De oude constraint liet enkel draft|sent|signed|cancelled toe, terwijl de
+-- code óók 'viewed' (ontvanger opent de tekenlink) en 'expired' (link vervallen)
+-- wegschrijft. Die updates stonden in een lege catch en faalden dus STIL: in de
+-- praktijk stond er geen enkel contract op 'viewed', ook niet nadat de link
+-- geopend was. De statussen "Geopend" en "Verlopen" bestonden wel in het scherm
+-- maar werden nooit bereikt.
+--
+-- De nieuwe lijst is exact de verzameling die lib/contract-status.ts kan lezen
+-- (de ALIAS-tabel daar). Regel: wat de app kan tonen, moet de app ook kunnen
+-- opslaan. Zowel de Engelse/oude waarden als de Nederlandse canonieke waarden
+-- staan erin, zodat er later zonder migratie naar de Nederlandse kan worden
+-- overgeschakeld.
+--
+-- Puur verruimend: de oude vier zitten er nog steeds in, dus geen enkele
+-- bestaande rij wordt ongeldig en er wordt geen data gewijzigd.
+ALTER TABLE public.contracts DROP CONSTRAINT IF EXISTS contracts_status_check;
+ALTER TABLE public.contracts ADD CONSTRAINT contracts_status_check CHECK (
+  status IN (
+    -- oude/Engelse waarden zoals ze vandaag in de database staan
+    'draft', 'sent', 'viewed', 'opened', 'filled', 'signed',
+    'cancelled', 'canceled', 'expired', 'replaced', 'template', 'declined',
+    -- canonieke Nederlandse waarden (lib/contract-status.ts)
+    'klaar_voor_verzenden', 'verzonden', 'geopend', 'ingevuld',
+    'getekend', 'geannuleerd', 'verlopen', 'vervangen', 'niet_geaccepteerd'
+  )
+);
+
+-- ── Belmodule: rijkere leaddata, terugbelnotitie en belscripts ──────────────
+-- De vaste leadlijsten (FAFO-formaat) dragen meer mee dan het oude
+-- bedrijvenmodel kon bewaren. Alles additief.
+ALTER TABLE public.sales_companies
+  ADD COLUMN IF NOT EXISTS email             text,   -- algemeen adres (info@)
+  ADD COLUMN IF NOT EXISTS werkklasse        text,   -- "10–19", "20–49" — het ruwe label
+  ADD COLUMN IF NOT EXISTS activiteit        text,   -- omschrijving uit de lijst (NACE-tekst)
+  ADD COLUMN IF NOT EXISTS ondernemingsnummer text,  -- KBO, voor de opzoeklink in Focus Mode
+  ADD COLUMN IF NOT EXISTS prioriteit        text;   -- A/B/C uit de lijst
+
+-- Wie je aan de lijn krijgt vóór je de juiste persoon spreekt, en wie die
+-- juiste persoon dan is. Twee namen die een setter aan de telefoon leert en
+-- die anders in een losse notitie verdwijnen: bij de volgende poging vraag je
+-- gericht naar de zaakvoerder in plaats van opnieuw langs de balie te moeten.
+-- Ze staan bij het BEDRIJF en niet bij de lead: dezelfde receptioniste zit er
+-- ook als we het bedrijf vanuit het andere merk bellen.
+ALTER TABLE public.sales_companies
+  ADD COLUMN IF NOT EXISTS gatekeeper_naam text,   -- balie/secretariaat
+  ADD COLUMN IF NOT EXISTS dmu_naam        text,   -- de beslissingnemer zelf
+  ADD COLUMN IF NOT EXISTS dmu_functie     text;   -- zijn functie, als je die hoorde
+
+-- ── Laatste notitie op de lead zelf ─────────────────────────────────────────
+-- De notities staan in sales_lead_events, maar dan zijn ze pas te zien nadat
+-- je een lead opent. In een lijst van honderden leads vind je zo nooit terug
+-- waar je gisteren iets over noteerde. Daarom staat de LAATSTE notitie ook op
+-- de lead zelf: één kolom die meekomt met de lijst, zonder extra query per rij.
+-- De tijdlijn blijft de bron; dit is een kopie voor de leesbaarheid.
+ALTER TABLE public.sales_leads
+  ADD COLUMN IF NOT EXISTS laatste_notitie    text,
+  ADD COLUMN IF NOT EXISTS laatste_notitie_op timestamptz;
+
+-- Eenmalig vullen vanuit de bestaande tijdlijn. Idempotent: draai je dit
+-- opnieuw, dan verandert er niets aan wat al klopt.
+WITH laatste AS (
+  SELECT DISTINCT ON (lead_id) lead_id, body, created_at
+  FROM public.sales_lead_events
+  WHERE kind IN ('note', 'call') AND coalesce(btrim(body), '') <> ''
+  ORDER BY lead_id, created_at DESC
+)
+UPDATE public.sales_leads l
+SET laatste_notitie = left(laatste.body, 300), laatste_notitie_op = laatste.created_at
+FROM laatste
+WHERE laatste.lead_id = l.id
+  AND (l.laatste_notitie IS DISTINCT FROM left(laatste.body, 300)
+       OR l.laatste_notitie_op IS DISTINCT FROM laatste.created_at);
+
+-- Terugbelafspraken: "bel over een uur terug" krijgt een notitie erbij, zodat
+-- in Focus Mode zichtbaar is WAAROM die lead straks weer bovenaan springt.
+ALTER TABLE public.sales_leads
+  ADD COLUMN IF NOT EXISTS callback_note text;
+
+-- De index op callback_at staat al hierboven als `sales_leads_callback`. Deze
+-- regel maakte er per ongeluk een tweede, identieke naast — dubbel schrijfwerk
+-- bij elke wijziging, zonder dat lezen er iets mee opschiet. Weggehaald, en de
+-- dubbel wordt hieronder opgeruimd als hij er al staat.
+DROP INDEX IF EXISTS public.sales_leads_callback_idx;
+
+-- Belscripts: het coldcallingscript van een setter, plus de AI-analyse ervan
+-- (secties, bezwaren met reacties, weetjes) als jsonb. De ruwe tekst blijft de
+-- bron; de analyse is een weergave en kan altijd opnieuw gemaakt worden.
+CREATE TABLE IF NOT EXISTS public.sales_scripts (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sales_client_id  uuid NOT NULL REFERENCES public.sales_clients(id) ON DELETE CASCADE,
+  naam             text NOT NULL,
+  -- NULL = algemeen script voor iedereen; anders het script van één setter.
+  eigenaar_auth_id uuid,
+  -- NULL = geldt voor alle merken.
+  pipeline_id      uuid REFERENCES public.sales_pipelines(id) ON DELETE SET NULL,
+  ruwe_tekst       text NOT NULL,
+  bron_bestand     text,
+  -- Aanhalingstekens verplicht: ANALYSE is in Postgres een gereserveerd woord
+  -- (de Britse spelling van ANALYZE). De kolom heet gewoon analyse; alleen
+  -- kale SQL moet hem quoten — PostgREST doet dat vanzelf.
+  "analyse"        jsonb,
+  analyse_model    text,
+  geanalyseerd_op  timestamptz,
+  actief           boolean NOT NULL DEFAULT true,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS sales_scripts_client_idx
+  ON public.sales_scripts (sales_client_id, actief);
+
+-- Zoals de hele verkoop-module: server-side via service-role; RLS als slot.
+ALTER TABLE public.sales_scripts ENABLE ROW LEVEL SECURITY;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Vier agenda's, twee merken: Bram×NGM, Bram×NGS, Marco×NGM, Marco×NGS.
+--
+-- Een gekoppelde agenda hoort voortaan bij één merk (pipeline). NULL blijft
+-- betekenen: zichtbaar voor beide merken — zo verandert er niets aan een
+-- bestaande installatie tot iemand het merk expliciet instelt.
+ALTER TABLE public.sales_calendar_connections
+  ADD COLUMN IF NOT EXISTS pipeline_id uuid REFERENCES public.sales_pipelines(id) ON DELETE SET NULL;
+
+-- Wie in ClickUp toegewezen wordt op de afspraaktaak (Bram of Marco).
+ALTER TABLE public.sales_calendar_connections
+  ADD COLUMN IF NOT EXISTS clickup_assignee_id bigint;
+
+-- Per merk: de ClickUp-lijst ("agenda") waar afspraaktaken in komen, en het
+-- interne adres dat bij elke nieuwe afspraak een melding krijgt.
+ALTER TABLE public.sales_pipelines
+  ADD COLUMN IF NOT EXISTS clickup_list_id text;
+ALTER TABLE public.sales_pipelines
+  ADD COLUMN IF NOT EXISTS notify_email text;
+
+-- De ClickUp-taak die bij een afspraak hoort: nodig om hem bij verzetten mee
+-- te verplaatsen en bij annuleren op te ruimen.
+ALTER TABLE public.sales_appointments
+  ADD COLUMN IF NOT EXISTS clickup_task_id text;
+
+-- Eén Google-account mag voortaan per MERK een koppeling hebben: "Marco ×
+-- NextGenMedia" en "Marco × NextGenSolutions" zijn twee agenda's in de app,
+-- ook als ze hetzelfde Google-account gebruiken. De oude sleutel (één rij per
+-- account) hield dat tegen.
+DROP INDEX IF EXISTS public.sales_calconn_unique_cal;
+CREATE UNIQUE INDEX IF NOT EXISTS sales_calconn_unique_cal_merk
+  ON public.sales_calendar_connections
+  (sales_client_id, provider, calendar_id, COALESCE(pipeline_id, '00000000-0000-0000-0000-000000000000'::uuid));
+
+-- Eigen titel voor het agenda-item van een afspraak. De prospect ziet de
+-- event-titel in zijn uitnodiging, dus de setter moet hem kunnen bepalen.
+ALTER TABLE public.sales_appointments ADD COLUMN IF NOT EXISTS titel text;
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- ClickUp → Google Calendar synchronisatie (eigen bouw: ClickUp's native sync
+-- kan niet "assignee → specifieke agenda").
+
+CREATE TABLE IF NOT EXISTS public.clickup_agenda_targets (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  clickup_assignee_id bigint NOT NULL UNIQUE,
+  naam                text NOT NULL,
+  google_calendar_id  text,
+  bron_connection_id  uuid REFERENCES public.sales_calendar_connections(id) ON DELETE SET NULL,
+  active              boolean NOT NULL DEFAULT true,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.clickup_agenda_items (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  target_id        uuid NOT NULL REFERENCES public.clickup_agenda_targets(id) ON DELETE CASCADE,
+  clickup_task_id  text NOT NULL,
+  google_event_id  text NOT NULL,
+  vingerafdruk     text NOT NULL,
+  due_ms           bigint,
+  updated_at       timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (target_id, clickup_task_id)
+);
+CREATE INDEX IF NOT EXISTS clickup_agenda_items_due ON public.clickup_agenda_items (due_ms);
+
+CREATE TABLE IF NOT EXISTS public.clickup_agenda_runs (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  gestart     timestamptz NOT NULL DEFAULT now(),
+  klaar       timestamptz,
+  ok          boolean,
+  fout        text,
+  aangemaakt  int NOT NULL DEFAULT 0,
+  bijgewerkt  int NOT NULL DEFAULT 0,
+  verwijderd  int NOT NULL DEFAULT 0,
+  overgeslagen int NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS clickup_agenda_runs_gestart ON public.clickup_agenda_runs (gestart DESC);
+
+CREATE TABLE IF NOT EXISTS public.cron_geheimen (
+  sleutel text PRIMARY KEY,
+  waarde  text NOT NULL
+);
+
+ALTER TABLE public.clickup_agenda_targets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.clickup_agenda_items   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.clickup_agenda_runs    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cron_geheimen          ENABLE ROW LEVEL SECURITY;
+
+INSERT INTO public.cron_geheimen (sleutel, waarde)
+VALUES ('clickup_agenda', replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''))
+ON CONFLICT (sleutel) DO NOTHING;
+
+-- Er mag maar ÉÉN sync tegelijk lopen: twee overlappende runs maakten
+-- dezelfde taken dubbel aan in Google. De databank dwingt dat nu af.
+CREATE UNIQUE INDEX IF NOT EXISTS clickup_agenda_runs_een_open
+  ON public.clickup_agenda_runs ((true)) WHERE klaar IS NULL;
+
+-- Vaste closer per merk: NextGenMedia → Bram, NextGenSolutions → Marco.
+ALTER TABLE public.sales_pipelines
+  ADD COLUMN IF NOT EXISTS default_calendar_id uuid
+  REFERENCES public.sales_calendar_connections(id) ON DELETE SET NULL;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Opdrachten: werk dat binnenkomt en opgevolgd moet worden — een contentshoot,
+-- een voorstel dat de deur uit is, iets waar we op de klant wachten.
+CREATE TABLE IF NOT EXISTS public.opdrachten (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id     uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  klant_vrij    text,
+  titel         text NOT NULL,
+  omschrijving  text,
+  status        text NOT NULL DEFAULT 'open',
+  deadline      date,
+  wie           text,
+  afgerond_op   timestamptz,
+  aangemaakt_door_email text,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT opdrachten_status_check
+    CHECK (status IN ('open','bezig','wacht','afgerond','geannuleerd'))
+);
+CREATE INDEX IF NOT EXISTS opdrachten_open_deadline
+  ON public.opdrachten (deadline)
+  WHERE status NOT IN ('afgerond','geannuleerd');
+CREATE INDEX IF NOT EXISTS opdrachten_client ON public.opdrachten (client_id);
+ALTER TABLE public.opdrachten ENABLE ROW LEVEL SECURITY;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Kantoor: samenwerking tussen bedrijven (onderaanneming en doorverwijzing).
+CREATE TABLE IF NOT EXISTS public.kantoor_bedrijven (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam        text NOT NULL,
+  is_eigen    boolean NOT NULL DEFAULT false,
+  email       text,
+  actief      boolean NOT NULL DEFAULT true,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS kantoor_bedrijven_naam ON public.kantoor_bedrijven (lower(naam));
+
+CREATE TABLE IF NOT EXISTS public.kantoor_leden (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bedrijf_id    uuid NOT NULL REFERENCES public.kantoor_bedrijven(id) ON DELETE CASCADE,
+  auth_user_id  uuid,
+  email         text NOT NULL,
+  naam          text,
+  actief        boolean NOT NULL DEFAULT true,
+  uitgenodigd_op timestamptz,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (bedrijf_id, email)
+);
+CREATE INDEX IF NOT EXISTS kantoor_leden_user ON public.kantoor_leden (auth_user_id) WHERE auth_user_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.kantoor_opdrachten (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  soort             text NOT NULL,
+  factureert_id     uuid NOT NULL REFERENCES public.kantoor_bedrijven(id) ON DELETE RESTRICT,
+  ontvangt_id       uuid NOT NULL REFERENCES public.kantoor_bedrijven(id) ON DELETE RESTRICT,
+  titel             text NOT NULL,
+  omschrijving      text,
+  klant_naam        text,
+  totaal_cents      bigint NOT NULL DEFAULT 0,
+  vergoeding_cents  bigint NOT NULL DEFAULT 0,
+  vergoeding_pct    numeric(5,2),
+  bedragen_zichtbaar boolean NOT NULL DEFAULT false,
+  status            text NOT NULL DEFAULT 'lopend',
+  afgerond_op       timestamptz,
+  aangemaakt_door   uuid,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT kantoor_opdr_soort  CHECK (soort  IN ('onderaanneming','doorverwijzing')),
+  CONSTRAINT kantoor_opdr_status CHECK (status IN ('lopend','afgerond','geannuleerd')),
+  CONSTRAINT kantoor_opdr_twee_partijen CHECK (factureert_id <> ontvangt_id),
+  CONSTRAINT kantoor_opdr_bedragen CHECK (
+    totaal_cents >= 0 AND vergoeding_cents >= 0 AND vergoeding_cents <= totaal_cents
+  )
+);
+CREATE INDEX IF NOT EXISTS kantoor_opdr_partijen ON public.kantoor_opdrachten (factureert_id, ontvangt_id);
+CREATE INDEX IF NOT EXISTS kantoor_opdr_afgerond ON public.kantoor_opdrachten (afgerond_op) WHERE status = 'afgerond';
+
+ALTER TABLE public.kantoor_bedrijven  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.kantoor_leden      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.kantoor_opdrachten ENABLE ROW LEVEL SECURITY;
+
+INSERT INTO public.kantoor_bedrijven (naam, is_eigen, email)
+SELECT v.naam, v.eigen, v.email FROM (VALUES
+  ('NextGenMedia',           true,  'info@nextgenmedia.be'),
+  ('NextGenSolutions',       true,  'info@nextgensolutions.be'),
+  ('Small Steps Big Impact', false, NULL),
+  ('Fully Booked',           false, NULL)
+) AS v(naam, eigen, email)
+WHERE NOT EXISTS (SELECT 1 FROM public.kantoor_bedrijven b WHERE lower(b.naam) = lower(v.naam));
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Twee setters die tegelijk bellen mogen nooit dezelfde lead krijgen.
+CREATE TABLE IF NOT EXISTS public.sales_lead_claims (
+  lead_id      uuid PRIMARY KEY REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  auth_user_id uuid NOT NULL,
+  naam         text,
+  verloopt_op  timestamptz NOT NULL,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sales_lead_claims_verloop ON public.sales_lead_claims (verloopt_op);
+ALTER TABLE public.sales_lead_claims ENABLE ROW LEVEL SECURITY;
+
+-- De hele beslissing in ÉÉN statement: hier kunnen twee setters elkaar kruisen.
+CREATE OR REPLACE FUNCTION public.claim_lead(
+  p_lead uuid, p_user uuid, p_naam text, p_minuten int DEFAULT 3
+)
+RETURNS TABLE (lead_id uuid, auth_user_id uuid, naam text, verloopt_op timestamptz)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  INSERT INTO public.sales_lead_claims AS c (lead_id, auth_user_id, naam, verloopt_op)
+  VALUES (p_lead, p_user, p_naam, now() + make_interval(mins => p_minuten))
+  ON CONFLICT (lead_id) DO UPDATE
+    SET auth_user_id = EXCLUDED.auth_user_id,
+        naam         = EXCLUDED.naam,
+        verloopt_op  = EXCLUDED.verloopt_op
+    WHERE c.auth_user_id = EXCLUDED.auth_user_id
+       OR c.verloopt_op < now()
+  RETURNING c.lead_id, c.auth_user_id, c.naam, c.verloopt_op;
+$$;
+
+-- De wezenopruiming is het duurste deel van een sync-run; bij een sync per
+-- minuut hoeft die niet elke keer mee. Deze vlag onthoudt wanneer er voor het
+-- laatst opgeruimd is.
+ALTER TABLE public.clickup_agenda_runs
+  ADD COLUMN IF NOT EXISTS opruiming boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS clickup_agenda_runs_opruiming
+  ON public.clickup_agenda_runs (gestart DESC) WHERE opruiming;
+
+-- Onthoudt of er voor DEZE storing al een alarmmail vertrok. Zonder die vlag
+-- kun je niet één keer per storing waarschuwen: je weet dan enkel dat de vorige
+-- run ook mislukte, niet of er al post over de deur ging.
+ALTER TABLE public.clickup_agenda_runs
+  ADD COLUMN IF NOT EXISTS alarm_verstuurd boolean NOT NULL DEFAULT false;
+
+-- Een zaakvoerder die zelf belt krijgt geen uurloon en geen commissie. Dat is
+-- iets anders dan "tarief nog niet ingevuld".
+ALTER TABLE public.sales_setters
+  ADD COLUMN IF NOT EXISTS onbezoldigd boolean NOT NULL DEFAULT false;
+
+-- Belpogingen tellen: na MAX_GEEN_GEHOOR vergeefse pogingen gaat een lead naar
+-- de fase 'max_pogingen' en uit de belronde.
+ALTER TABLE public.sales_leads
+  ADD COLUMN IF NOT EXISTS geen_gehoor_count int NOT NULL DEFAULT 0;
+
+-- ── Instagram + Facebook = één kanaal "meta" ────────────────────────────────
+-- Je plant er in de praktijk nooit apart voor: dezelfde post gaat naar allebei.
+-- Twee losse kanalen leverden enkel dubbele regels in de kalender op. De lijst
+-- staat nu in lib/social-platforms.ts; dit brengt de bestaande content mee.
+-- Idempotent: draai je het opnieuw, dan is er niets meer te veranderen.
+UPDATE public.social_content_items
+SET platforms = ARRAY(
+  SELECT g.k FROM (
+    SELECT CASE WHEN p IN ('instagram','facebook') THEN 'meta' ELSE p END AS k, MIN(ord) AS o
+    FROM unnest(platforms) WITH ORDINALITY AS t(p, ord)
+    GROUP BY 1
+  ) g ORDER BY g.o
+)
+WHERE platforms && ARRAY['instagram','facebook']::text[];
+
+UPDATE public.social_content_items
+SET platform = 'meta'
+WHERE platform IN ('instagram','facebook');
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- HARRIE-KOPPELING — pipeline delen met het acquisitiesysteem
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Harrie stuurt koude mails en LinkedIn-berichten. Hij mag NOOIT iemand
+-- benaderen die al klant is of met wie we in gesprek zijn: dat kost ons de
+-- reputatie van het adres waarmee we mailen. Daarom haalt hij hier op wie er
+-- geblokkeerd is, en meldt hij terug wat hij deed.
+--
+-- Machine-naar-machine: één Bearer-token, geen sessie. Vandaar eigen tabellen.
+
+-- Tokens. We bewaren enkel de HASH — net als bij wachtwoorden. Wie de databank
+-- leest, kan er dus niet mee inloggen; het token zelf zie je één keer, bij het
+-- aanmaken. `prefix` is louter om de sleutel in de lijst te herkennen.
+CREATE TABLE IF NOT EXISTS public.harrie_tokens (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam             text NOT NULL,
+  token_hash       text NOT NULL UNIQUE,
+  prefix           text NOT NULL,
+  aangemaakt_door  uuid,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  laatst_gebruikt  timestamptz,
+  aantal_verzoeken bigint NOT NULL DEFAULT 0,
+  ingetrokken_op   timestamptz
+);
+CREATE INDEX IF NOT EXISTS harrie_tokens_actief ON public.harrie_tokens (token_hash) WHERE ingetrokken_op IS NULL;
+
+-- Het logboek van wat Harrie meldde. `idempotency_key` is uniek: stuurt hij
+-- dezelfde gebeurtenis twee keer (na een haperende verbinding), dan verwerken
+-- we ze één keer en antwoorden we 409.
+CREATE TABLE IF NOT EXISTS public.harrie_events (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  idempotency_key text NOT NULL UNIQUE,
+  type            text NOT NULL,
+  gebeurd_op      timestamptz,
+  prospect        jsonb NOT NULL DEFAULT '{}'::jsonb,
+  detail          text,
+  lead_id         uuid REFERENCES public.sales_leads(id) ON DELETE SET NULL,
+  resultaat       text,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS harrie_events_tijd ON public.harrie_events (created_at DESC);
+CREATE INDEX IF NOT EXISTS harrie_events_lead ON public.harrie_events (lead_id);
+
+-- Instellingen: één rij. Welke fases blokkeren, en in welke pipeline nieuwe
+-- prospects van Harrie terechtkomen.
+-- Eén instelling, één rij: waar landen nieuwe prospects van Harrie? Meer valt
+-- er niet in te stellen — Harrie krijgt de volledige pipeline en beslist zelf
+-- wat hij ermee doet.
+CREATE TABLE IF NOT EXISTS public.harrie_instellingen (
+  id                 boolean PRIMARY KEY DEFAULT true CHECK (id),
+  pipeline_id        uuid REFERENCES public.sales_pipelines(id) ON DELETE SET NULL,
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO public.harrie_instellingen (id) VALUES (true) ON CONFLICT (id) DO NOTHING;
+
+ALTER TABLE public.harrie_tokens       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.harrie_events       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.harrie_instellingen ENABLE ROW LEVEL SECURITY;
+
+-- Klanten hadden geen `updated_at`. Zonder dat veld kan Harrie niet vragen
+-- "wat is er sinds gisteren veranderd" en moet hij élke keer alles ophalen.
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+DO $$ BEGIN
+  CREATE TRIGGER trg_clients_updated BEFORE UPDATE ON public.clients
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; WHEN undefined_function THEN NULL; END $$;
+
+-- Eén statement dat optelt, zodat twee gelijktijdige verzoeken elkaars telling
+-- niet overschrijven. SECURITY DEFINER omdat de tabel achter RLS zit.
+CREATE OR REPLACE FUNCTION public.harrie_token_gebruikt(p_token_id uuid)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  UPDATE public.harrie_tokens
+  SET laatst_gebruikt = now(), aantal_verzoeken = aantal_verzoeken + 1
+  WHERE id = p_token_id;
+$$;
+REVOKE ALL ON FUNCTION public.harrie_token_gebruikt(uuid) FROM public, anon, authenticated;
+
+-- Harrie vraagt "wat is er sinds X gewijzigd" en filtert op sales_leads.updated_at.
+-- Maar een verbeterd telefoonnummer staat bij het BEDRIJF en een nieuw
+-- e-mailadres bij de CONTACTPERSOON. Zonder deze twee triggers verschuift de
+-- lead dan niet en ziet Harrie die correctie pas bij de volledige ophaling van
+-- de volgende dag — terwijl het net het nummer is waarmee hij belt. Nu is
+-- sales_leads.updated_at de enige waarheid: "er is iets aan deze lead veranderd".
+CREATE OR REPLACE FUNCTION public.raak_leads_van_bedrijf_aan()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  UPDATE public.sales_leads SET updated_at = now() WHERE company_id = NEW.id;
+  RETURN NEW;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.raak_leads_van_contact_aan()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  UPDATE public.sales_leads SET updated_at = now() WHERE contact_id = NEW.id;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_bedrijf_raakt_leads ON public.sales_companies;
+CREATE TRIGGER trg_bedrijf_raakt_leads AFTER UPDATE ON public.sales_companies
+  FOR EACH ROW EXECUTE FUNCTION public.raak_leads_van_bedrijf_aan();
+
+DROP TRIGGER IF EXISTS trg_contact_raakt_leads ON public.sales_contacts;
+CREATE TRIGGER trg_contact_raakt_leads AFTER UPDATE ON public.sales_contacts
+  FOR EACH ROW EXECUTE FUNCTION public.raak_leads_van_contact_aan();
+
+-- De blokkeerlijst is er weer uit: Harrie ziet elke fase en beslist zelf.
+ALTER TABLE public.harrie_instellingen DROP COLUMN IF EXISTS geblokkeerde_fases;
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- HARRIE PRAAT RECHTSTREEKS MET SUPABASE
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Geen tussenliggende API meer: Harrie leest de view `harrie_pipeline` en zet
+-- één rij in `harrie_events`. Een trigger bepaalt daarna wat die gebeurtenis
+-- voor de pipeline betekent, zodat die faselogica op ÉÉN plek staat en Harrie
+-- geen enkele regel hoeft te kennen.
+
+-- ── Nieuwe kolommen op de lead ──────────────────────────────────────────────
+ALTER TABLE public.sales_leads
+  ADD COLUMN IF NOT EXISTS reden_code text,     -- gestructureerde afwijsreden
+  ADD COLUMN IF NOT EXISTS warm boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS warm_op timestamptz,
+  ADD COLUMN IF NOT EXISTS harrie jsonb;        -- laatste blokje van Harrie
+CREATE INDEX IF NOT EXISTS sales_leads_warm ON public.sales_leads (warm) WHERE warm;
+CREATE INDEX IF NOT EXISTS sales_leads_reden ON public.sales_leads (reden_code) WHERE reden_code IS NOT NULL;
+
+ALTER TABLE public.harrie_events ADD COLUMN IF NOT EXISTS harrie jsonb;
+
+-- Logboek van de fasesplitsing, zodat ze omkeerbaar is.
+CREATE TABLE IF NOT EXISTS public.sales_stage_migratie (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id       uuid NOT NULL,
+  van           text NOT NULL,
+  naar          text NOT NULL,
+  regel         text NOT NULL,
+  uitgevoerd_op timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sales_stage_migratie_lead ON public.sales_stage_migratie (lead_id);
+ALTER TABLE public.sales_stage_migratie ENABLE ROW LEVEL SECURITY;
+
+-- ── De fases: één lijst, drie kanalen ──────────────────────────────────────
+-- Terugdraaien kan met sales_stage_migratie:
+--   UPDATE sales_leads l SET stage_key = m.van
+--   FROM sales_stage_migratie m WHERE m.lead_id = l.id;
+WITH bepaald AS (
+  SELECT l.id, l.stage_key AS van,
+    CASE
+      WHEN l.stage_key = 'email_todo' THEN 'email_after_call'
+      WHEN l.stage_key = 'interested' THEN 'contacted_call'
+      WHEN l.stage_key = 'contacted' AND EXISTS (
+        SELECT 1 FROM public.sales_lead_events e WHERE e.lead_id = l.id AND e.kind = 'call')
+        THEN 'contacted_call'
+      WHEN l.stage_key = 'contacted' AND EXISTS (
+        SELECT 1 FROM public.sales_lead_events e WHERE e.lead_id = l.id AND e.body ILIKE 'Harrie:%linkedin%')
+        THEN 'contacted_linkedin'
+      WHEN l.stage_key = 'contacted' AND EXISTS (
+        SELECT 1 FROM public.sales_lead_events e WHERE e.lead_id = l.id AND e.body LIKE 'Harrie:%')
+        THEN 'contacted_mail'
+      WHEN l.stage_key = 'contacted' THEN 'contacted_call'
+    END AS naar,
+    CASE
+      WHEN l.stage_key = 'email_todo' THEN 'hernoemd: email_todo -> email_after_call'
+      WHEN l.stage_key = 'interested' THEN 'interested bestaat niet meer -> contacted_call + warm'
+      WHEN l.stage_key = 'contacted' AND EXISTS (
+        SELECT 1 FROM public.sales_lead_events e WHERE e.lead_id = l.id AND e.kind = 'call')
+        THEN 'belpoging in de historiek'
+      WHEN l.stage_key = 'contacted' AND EXISTS (
+        SELECT 1 FROM public.sales_lead_events e WHERE e.lead_id = l.id AND e.body ILIKE 'Harrie:%linkedin%')
+        THEN 'enkel Harrie, laatste spoor LinkedIn'
+      WHEN l.stage_key = 'contacted' AND EXISTS (
+        SELECT 1 FROM public.sales_lead_events e WHERE e.lead_id = l.id AND e.body LIKE 'Harrie:%')
+        THEN 'enkel Harrie, laatste spoor mail'
+      WHEN l.stage_key = 'contacted' THEN 'geen spoor -> bellen is de bestaande workflow'
+    END AS regel
+  FROM public.sales_leads l
+  WHERE l.stage_key IN ('contacted', 'interested', 'email_todo')
+), gelogd AS (
+  INSERT INTO public.sales_stage_migratie (lead_id, van, naar, regel)
+  SELECT id, van, naar, regel FROM bepaald WHERE naar IS NOT NULL
+  RETURNING lead_id, naar
+)
+UPDATE public.sales_leads l
+SET stage_key = g.naar,
+    warm    = CASE WHEN l.stage_key = 'interested' THEN true ELSE l.warm END,
+    warm_op = CASE WHEN l.stage_key = 'interested' THEN now() ELSE l.warm_op END
+FROM gelogd g WHERE g.lead_id = l.id;
+
+-- Oude fasesleutels uit de labeltabel; de nieuwe komen uit lib/sales/stages.ts
+-- via ensureStages(), maar we zetten ze hier ook zodat een verse databank klopt.
+DELETE FROM public.sales_stages WHERE key IN ('contacted','interested','email_todo','te_bellen');
+INSERT INTO public.sales_stages (sales_client_id, key, label, position, is_won, is_lost)
+SELECT c.id, v.key, v.label, v.pos, v.won, v.lost
+FROM public.sales_clients c
+CROSS JOIN (VALUES
+  ('to_contact','Nog te contacteren',1,false,false),
+  ('contacted_call','Gecontacteerd · Bellen',2,false,false),
+  ('contacted_linkedin','Gecontacteerd · LinkedIn',3,false,false),
+  ('contacted_mail','Gecontacteerd · Mail',4,false,false),
+  ('email_after_call','E-mail versturen na bellen',5,false,false),
+  ('email_sent','E-mail verstuurd',6,false,false),
+  ('not_interested','Geen interesse',7,false,false),
+  ('appointment','Afspraak ingepland',8,false,false),
+  ('max_pogingen','Max. belpogingen',9,false,false),
+  ('won','Closed Won',10,true,false),
+  ('lost','Closed Lost',11,false,true)
+) AS v(key,label,pos,won,lost)
+ON CONFLICT (sales_client_id, key) DO UPDATE
+SET label = EXCLUDED.label, position = EXCLUDED.position,
+    is_won = EXCLUDED.is_won, is_lost = EXCLUDED.is_lost;
+
+-- Bestaande afwijsredenen op een telbare code leggen.
+UPDATE public.sales_leads SET reden_code = CASE
+  WHEN lost_reason ILIKE 'Heeft al een partner%'                          THEN 'al_partner'
+  WHEN lost_reason ILIKE 'Doet marketing intern%' OR lost_reason ILIKE 'Intern%' THEN 'intern'
+  WHEN lost_reason ILIKE 'Geen behoefte%'                                 THEN 'geen_behoefte'
+  WHEN lost_reason ILIKE 'Geen budget%'                                   THEN 'geen_budget'
+  WHEN lost_reason ILIKE 'Te duur%'                                       THEN 'te_duur'
+  WHEN lost_reason ILIKE 'Slechte ervaring%'                              THEN 'slechte_ervaring'
+  WHEN lost_reason ILIKE 'Niet nu%'                                       THEN 'timing'
+  WHEN lost_reason ILIKE 'Verkeerde persoon%'                             THEN 'verkeerde_persoon'
+  ELSE 'anders' END
+WHERE lost_reason IS NOT NULL AND reden_code IS NULL;
+
+-- ── Hulpfuncties: dezelfde regels als lib/sales/dedupe.ts ──────────────────
+-- LET OP: deze SQL en die TypeScript moeten hetzelfde antwoord geven. Lopen ze
+-- uiteen, dan maakt Harrie een tweede dossier voor een bedrijf dat er al staat.
+-- Nagekeken op alle 3.988 bestaande bedrijven: identiek.
+CREATE EXTENSION IF NOT EXISTS unaccent;
+
+CREATE OR REPLACE FUNCTION public.harrie_norm_kbo(ruw text)
+RETURNS text LANGUAGE sql IMMUTABLE AS $fn$
+  SELECT CASE
+    WHEN d = '' THEN NULL
+    WHEN length(d) = 12 AND d LIKE '00%' THEN right(d, 10)
+    WHEN length(d) = 9  THEN '0' || d
+    WHEN length(d) = 10 THEN d
+    ELSE NULL END
+  FROM (SELECT regexp_replace(coalesce(ruw, ''), '\D', '', 'g') AS d) x;
+$fn$;
+
+CREATE OR REPLACE FUNCTION public.harrie_web_host(ruw text)
+RETURNS text LANGUAGE sql IMMUTABLE AS $fn$
+  SELECT nullif(regexp_replace(
+    regexp_replace(lower(btrim(coalesce(ruw, ''))), '^[a-z]+://', ''),
+    '^www\.|[/?#].*$', '', 'g'), '');
+$fn$;
+
+CREATE OR REPLACE FUNCTION public.harrie_dedupe_key(naam text, website text)
+RETURNS text LANGUAGE plpgsql IMMUTABLE AS $fn$
+DECLARE host text; tokens text[]; gehouden text[];
+BEGIN
+  host := public.harrie_web_host(website);
+  IF host IS NOT NULL AND position('.' in host) > 0 THEN RETURN 'web:' || host; END IF;
+  tokens := regexp_split_to_array(
+    regexp_replace(lower(unaccent(coalesce(naam, ''))), '\.', '', 'g'), '[^a-z0-9]+');
+  SELECT array_agg(t) INTO gehouden FROM unnest(tokens) t
+  WHERE t <> '' AND t NOT IN ('bv','bvba','nv','vzw','commv','cv','cvba','sa','sprl','srl',
+                              'gcv','vof','ltd','limited','llc','inc','gmbh','ag','plc','bvi');
+  IF gehouden IS NULL OR array_length(gehouden, 1) IS NULL THEN
+    SELECT array_agg(t) INTO gehouden FROM unnest(tokens) t WHERE t <> '';
+  END IF;
+  RETURN 'name:' || coalesce(array_to_string(gehouden, ''), '');
+END $fn$;
+
+-- De rang bewaakt dat een lead nooit terugvalt: staat er al een afspraak en
+-- meldt Harrie nog een mail uit een lopende reeks, dan is dat een tijdlijnregel.
+CREATE OR REPLACE FUNCTION public.harrie_stage_rang(fase text)
+RETURNS int LANGUAGE sql IMMUTABLE AS $fn$
+  SELECT CASE fase
+    WHEN 'to_contact' THEN 10
+    WHEN 'contacted_call' THEN 20 WHEN 'contacted_linkedin' THEN 20 WHEN 'contacted_mail' THEN 20
+    WHEN 'email_after_call' THEN 30 WHEN 'email_sent' THEN 40 WHEN 'appointment' THEN 50
+    WHEN 'max_pogingen' THEN 80 WHEN 'not_interested' THEN 90 WHEN 'lost' THEN 95 WHEN 'won' THEN 99
+    ELSE 0 END;
+$fn$;
+
+CREATE OR REPLACE FUNCTION public.harrie_reden_code(tekst text)
+RETURNS text LANGUAGE sql IMMUTABLE AS $fn$
+  SELECT CASE
+    WHEN t ~ 'te duur|prijs|prijzig|duurder'    THEN 'te_duur'
+    WHEN t ~ 'intern|zelf doen|eigen team'      THEN 'intern'
+    WHEN t ~ 'al een partner|al (een )?bureau|werken al met|hebben al iemand' THEN 'al_partner'
+    WHEN t ~ 'geen behoefte|niet nodig'         THEN 'geen_behoefte'
+    WHEN t ~ 'geen budget|geen geld'            THEN 'geen_budget'
+    WHEN t ~ 'verkeerde persoon|niet de juiste' THEN 'verkeerde_persoon'
+    WHEN t ~ 'timing|later|nu niet|geen tijd'   THEN 'timing'
+    WHEN t ~ 'slechte ervaring|teleurgesteld'   THEN 'slechte_ervaring'
+    ELSE 'anders' END
+  FROM (SELECT lower(coalesce(tekst, '')) AS t) x;
+$fn$;
+
+-- Lijsten ontdubbelen: het adres van de contactpersoon is vaak hetzelfde als
+-- dat van het bedrijf, en het domein komt uit drie bronnen. Harrie matcht op
+-- deze lijsten; drie keer hetzelfde domein maakt dat enkel trager.
+CREATE OR REPLACE FUNCTION public.harrie_uniek(arr text[])
+RETURNS text[] LANGUAGE sql IMMUTABLE AS $fn$
+  SELECT coalesce(array_agg(DISTINCT x), ARRAY[]::text[])
+  FROM unnest(coalesce(arr, ARRAY[]::text[])) x
+  WHERE x IS NOT NULL AND btrim(x) <> '';
+$fn$;
+
+-- ── De view waaruit Harrie leest ───────────────────────────────────────────
+-- BEVEILIGING. Een view draait standaard met de rechten van zijn EIGENAAR, niet
+-- van wie hem bevraagt. Zonder de twee regels onderaan omzeilt deze view dus de
+-- RLS op sales_leads en kan IEDEREEN met de publieke anon-sleutel — die in elke
+-- browser zit — de volledige pipeline lezen: namen, nummers, e-mailadressen.
+-- Dat is precies wat hier misging bij het bouwen. Beide sloten moeten blijven.
+-- ── Eén lead per bedrijf ───────────────────────────────────────────────────
+-- Er stond één lead per bedrijf PER LIJST. Nu het merk pas bij de afspraak
+-- vastligt, is dat onzin geworden: hetzelfde bedrijf stond twee keer, met twee
+-- geschiedenissen, en een setter belde het twee keer.
+--
+-- De dubbels zijn SAMENGEVOEGD, niet gewist. De lead die het verst stond is
+-- gebleven; de andere stond zijn labels af en is gearchiveerd. Wie wat werd
+-- staat in sales_lead_samenvoegingen, dus het is terug te draaien.
+CREATE TABLE IF NOT EXISTS public.sales_lead_samenvoegingen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  winnaar_id uuid NOT NULL REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  verliezer_id uuid NOT NULL REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  labels_overgenomen text[] NOT NULL DEFAULT '{}'::text[],
+  wanneer timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (verliezer_id)
+);
+ALTER TABLE public.sales_lead_samenvoegingen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.sales_lead_samenvoegingen FROM anon, authenticated;
+
+INSERT INTO public.sales_lead_samenvoegingen (winnaar_id, verliezer_id, labels_overgenomen)
+WITH d AS (
+  SELECT company_id FROM public.sales_leads WHERE archived_at IS NULL
+  GROUP BY 1 HAVING count(*) > 1),
+g AS (
+  SELECT l.id, l.company_id, l.labels,
+    row_number() OVER (PARTITION BY l.company_id ORDER BY
+      CASE l.stage_key
+        WHEN 'won' THEN 99 WHEN 'lost' THEN 95 WHEN 'not_interested' THEN 90
+        WHEN 'max_pogingen' THEN 80 WHEN 'appointment' THEN 50 WHEN 'email_sent' THEN 40
+        WHEN 'email_after_call' THEN 30 WHEN 'contacted_call' THEN 20
+        WHEN 'contacted_linkedin' THEN 20 WHEN 'contacted_mail' THEN 20
+        WHEN 'to_contact' THEN 10 ELSE 0 END DESC,
+      (SELECT count(*) FROM public.sales_lead_events e WHERE e.lead_id = l.id) DESC,
+      l.created_at ASC) AS rn
+  FROM public.sales_leads l JOIN d ON d.company_id = l.company_id
+  WHERE l.archived_at IS NULL)
+SELECT w.id, v.id,
+  coalesce((SELECT array_agg(DISTINCT x) FROM unnest(v.labels) x
+            WHERE NOT (coalesce(w.labels, '{}'::text[]) @> ARRAY[x])), '{}'::text[])
+FROM g w JOIN g v ON v.company_id = w.company_id AND w.rn = 1 AND v.rn = 2
+ON CONFLICT (verliezer_id) DO NOTHING;
+
+-- Labels van de verliezer erbij: zo blijft "Boekhouding" doorzoekbaar.
+UPDATE public.sales_leads w
+SET labels = (SELECT array_agg(DISTINCT x)
+              FROM unnest(coalesce(w.labels, '{}'::text[]) || s.labels_overgenomen) x)
+FROM public.sales_lead_samenvoegingen s
+WHERE w.id = s.winnaar_id AND coalesce(array_length(s.labels_overgenomen, 1), 0) > 0;
+
+UPDATE public.sales_leads SET archived_at = now()
+WHERE id IN (SELECT verliezer_id FROM public.sales_lead_samenvoegingen)
+  AND archived_at IS NULL;
+
+-- Eerst de nieuwe grendel zetten, pas daarna de oude weghalen: mislukt de
+-- nieuwe omdat er toch nog een dubbel staat, dan blijft de oude bescherming
+-- overeind in plaats van dat er even helemaal geen is.
+CREATE UNIQUE INDEX IF NOT EXISTS sales_leads_one_per_company
+  ON public.sales_leads (sales_client_id, company_id) WHERE archived_at IS NULL;
+DROP INDEX IF EXISTS public.sales_leads_one_per_company_pipeline;
+
+-- ── Eén lijst; het merk ligt pas vast bij de afspraak ──────────────────────
+-- Vooraf een merk kiezen is een keuze op het verkeerde moment: je hoort pas
+-- tijdens het gesprek of iemand een website nodig heeft of social media. Dus
+-- belt iedereen uit één lijst en blijft `merken` leeg tot er een afspraak
+-- staat. Vanaf dat punt hangt er wél iets aan het merk — de brochure, de
+-- afzender, de agendakleur en de ClickUp-lijst — en wordt het vastgelegd.
+--
+-- `pipeline_id` blijft bestaan, maar betekent voortaan HERKOMST: uit welke
+-- lijst een lead komt. Het is ook de ontdubbelbak (zie de unieke index
+-- sales_leads_one_per_company_pipeline), dus het mag niet zomaar leeg.
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS merken text[] NOT NULL DEFAULT '{}'::text[];
+CREATE INDEX IF NOT EXISTS sales_leads_merken_idx ON public.sales_leads USING gin (merken);
+
+-- Afdwingen in de databank en niet in de app: leads komen ook binnen via
+-- import en via Harrie's trigger, en een regel die maar op één van die drie
+-- paden geldt is geen regel.
+CREATE OR REPLACE FUNCTION public.sales_leads_merken_sync() RETURNS trigger
+LANGUAGE plpgsql AS $fn$
+DECLARE v_key text;
+BEGIN
+  IF NEW.stage_key IN ('appointment', 'won', 'lost')
+     AND coalesce(array_length(NEW.merken, 1), 0) = 0
+     AND NEW.pipeline_id IS NOT NULL THEN
+    SELECT key INTO v_key FROM public.sales_pipelines WHERE id = NEW.pipeline_id;
+    IF v_key IS NOT NULL THEN NEW.merken := ARRAY[v_key]; END IF;
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+
+DROP TRIGGER IF EXISTS sales_leads_merken_sync ON public.sales_leads;
+CREATE TRIGGER sales_leads_merken_sync
+BEFORE INSERT OR UPDATE OF pipeline_id, merken, stage_key ON public.sales_leads
+FOR EACH ROW EXECUTE FUNCTION public.sales_leads_merken_sync();
+
+-- Vanaf de afspraak: merk uit de herkomst, als het er nog niet stond.
+UPDATE public.sales_leads l SET merken = ARRAY[p.key]
+FROM public.sales_pipelines p
+WHERE p.id = l.pipeline_id
+  AND l.stage_key IN ('appointment', 'won', 'lost')
+  AND l.merken = '{}'::text[];
+
+CREATE OR REPLACE VIEW public.harrie_pipeline AS
+SELECT
+  'lead_' || l.id::text AS id, l.id AS lead_id, c.name AS company,
+  nullif(regexp_replace(coalesce(c.ondernemingsnummer,''), '\D', '', 'g'), '') AS kbo,
+  public.harrie_uniek(ARRAY[lower(ct.email), lower(c.email)]) AS emails,
+  public.harrie_uniek(ARRAY[
+    nullif(regexp_replace(lower(coalesce(c.website,'')), '^https?://(www\.)?|/.*$', '', 'g'), ''),
+    nullif(split_part(lower(coalesce(ct.email,'')), '@', 2), ''),
+    nullif(split_part(lower(coalesce(c.email,'')),  '@', 2), '')]) AS domains,
+  public.harrie_uniek(ARRAY[ct.phone, ct.mobile, c.phone]) AS phones,
+  c.website, s.label AS stage, l.stage_key AS "stageKey",
+  l.do_not_call AS "doNotContact",
+  CASE WHEN l.do_not_call THEN coalesce(l.do_not_call_reason, 'Staat op bel-me-niet') END AS "doNotContactReason",
+  ct.name AS "contactName", c.city, c.sector, l.callback_at AS "callbackAt",
+  l.labels, l.warm, l.lost_reason AS "redenTekst", l.reden_code AS "redenCode",
+  l.harrie, l.archived_at IS NOT NULL AS deleted,
+  GREATEST(l.updated_at, c.updated_at, coalesce(ct.updated_at, l.updated_at)) AS "updatedAt",
+  pl.key AS pipeline, pl.name AS "pipelineNaam", l.created_at AS "aangemaaktOp",
+  coalesce(l.merken, '{}'::text[]) AS merken
+FROM public.sales_leads l
+JOIN public.sales_companies c ON c.id = l.company_id
+LEFT JOIN public.sales_contacts ct ON ct.id = l.contact_id
+LEFT JOIN public.sales_stages s ON s.key = l.stage_key AND s.sales_client_id = l.sales_client_id
+LEFT JOIN public.sales_pipelines pl ON pl.id = l.pipeline_id
+-- Samengevoegde dubbels horen hier niet meer thuis. Ze staan gearchiveerd, en
+-- `deleted` betekent voor Harrie "weer vrij" — maar dat zijn ze niet: hun
+-- gesprek loopt gewoon door op de lead waarin ze zijn opgegaan.
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.sales_lead_samenvoegingen sv WHERE sv.verliezer_id = l.id)
+-- En om diezelfde reden: wie UIT DE DOELGROEP gehaald is, is niet vrijgegeven
+-- maar juist bewust weggehaald. Zou die als `deleted` doorgegeven worden, dan
+-- las Harrie dat als een uitnodiging om er alsnog achteraan te gaan.
+AND NOT (l.archived_at IS NOT NULL AND l.labels @> ARRAY['Uit doelgroep'])
+UNION ALL
+SELECT 'client_' || k.id::text, NULL, k.company_name,
+  nullif(regexp_replace(coalesce(k.btw_nummer,''), '\D', '', 'g'), ''),
+  public.harrie_uniek(ARRAY[lower(k.email)]),
+  public.harrie_uniek(ARRAY[
+    nullif(regexp_replace(lower(coalesce(k.website_url,'')), '^https?://(www\.)?|/.*$', '', 'g'), ''),
+    nullif(split_part(lower(coalesce(k.email,'')), '@', 2), '')]),
+  ARRAY[]::text[], k.website_url,
+  CASE WHEN k.archived_at IS NOT NULL THEN 'Oud-klant' ELSE 'Klant' END,
+  CASE WHEN k.archived_at IS NOT NULL THEN 'oud_klant' ELSE 'klant' END,
+  true, 'Is klant van ons', k.contact_name, NULL, k.niche, NULL,
+  ARRAY[]::text[], false, NULL, NULL, NULL, false, k.updated_at,
+  NULL, NULL, k.created_at, ARRAY[]::text[]
+FROM public.clients k
+UNION ALL
+SELECT 'kantoor_' || b.id::text, NULL, b.naam, NULL,
+  public.harrie_uniek(ARRAY[lower(b.email)]),
+  public.harrie_uniek(ARRAY[nullif(split_part(lower(coalesce(b.email,'')), '@', 2), '')]),
+  ARRAY[]::text[], NULL,
+  CASE WHEN b.is_eigen THEN 'Eigen bedrijf' ELSE 'Partner' END,
+  CASE WHEN b.is_eigen THEN 'eigen_bedrijf' ELSE 'partner' END,
+  true, CASE WHEN b.is_eigen THEN 'Ons eigen bedrijf' ELSE 'Partner waarmee we samenwerken' END,
+  NULL, NULL, NULL, NULL, ARRAY[]::text[], false, NULL, NULL, NULL, false, b.created_at,
+  NULL, NULL, b.created_at, ARRAY[]::text[]
+FROM public.kantoor_bedrijven b;
+
+ALTER VIEW public.harrie_pipeline SET (security_invoker = on);
+REVOKE ALL ON public.harrie_pipeline FROM anon, authenticated;
+GRANT SELECT ON public.harrie_pipeline TO service_role;
+REVOKE ALL ON public.harrie_events FROM anon, authenticated;
+GRANT SELECT, INSERT ON public.harrie_events TO service_role;
+REVOKE ALL ON public.harrie_tokens FROM anon, authenticated;
+REVOKE ALL ON public.harrie_instellingen FROM anon, authenticated;
+GRANT SELECT ON public.harrie_instellingen TO service_role;
+
+-- ── Waar Harrie schrijft: één insert, de trigger doet de rest ──────────────
+-- Harrie hoeft geen enkele faseregel te kennen. Hij zet een gebeurtenis neer;
+-- deze functie zoekt de lead (e-mail -> KBO -> algemeen adres -> bedrijfsnaam),
+-- maakt er een aan als er geen is, en past toe wat die gebeurtenis betekent.
+CREATE OR REPLACE FUNCTION public.harrie_verwerk_event()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  p            jsonb := coalesce(NEW.prospect, '{}'::jsonb);
+  blok         jsonb := coalesce(NEW.harrie, '{}'::jsonb);
+  v_email      text  := lower(nullif(btrim(p->>'email'), ''));
+  v_kbo        text  := public.harrie_norm_kbo(p->>'kbo');
+  v_naam       text  := nullif(btrim(coalesce(p->>'company', p->>'name')), '');
+  v_kanaal     text  := coalesce(blok->>'kanaal', '');
+  v_lead uuid; v_bedrijf uuid; v_contact uuid; v_pipeline uuid; v_klant uuid;
+  v_nieuw boolean := false;
+  v_huidig text; v_warm boolean; v_reden text; v_labels text[];
+  v_fase text; v_vooruit boolean := false; v_enkelnieuw boolean := false;
+  v_zetfase boolean := false; v_regel text;
+  v_res text[] := ARRAY[]::text[];
+BEGIN
+  SELECT pipeline_id INTO v_pipeline FROM public.harrie_instellingen WHERE id;
+  IF v_pipeline IS NULL THEN
+    SELECT id INTO v_pipeline FROM public.sales_pipelines WHERE key = 'nextgenmedia' LIMIT 1;
+  END IF;
+  IF v_pipeline IS NULL THEN
+    SELECT id INTO v_pipeline FROM public.sales_pipelines ORDER BY created_at LIMIT 1;
+  END IF;
+  SELECT id INTO v_klant FROM public.sales_clients ORDER BY created_at LIMIT 1;
+
+  -- Zoeken in volgorde van zekerheid.
+  IF v_email IS NOT NULL THEN
+    SELECT l.id INTO v_lead FROM public.sales_leads l
+    JOIN public.sales_contacts ct ON ct.id = l.contact_id
+    WHERE lower(ct.email) = v_email AND l.pipeline_id = v_pipeline AND l.archived_at IS NULL LIMIT 1;
+  END IF;
+  IF v_lead IS NULL AND v_kbo IS NOT NULL THEN
+    SELECT l.id INTO v_lead FROM public.sales_leads l
+    JOIN public.sales_companies c ON c.id = l.company_id
+    WHERE public.harrie_norm_kbo(c.ondernemingsnummer) = v_kbo
+      AND l.pipeline_id = v_pipeline AND l.archived_at IS NULL LIMIT 1;
+  END IF;
+  IF v_lead IS NULL AND v_email IS NOT NULL THEN
+    SELECT l.id INTO v_lead FROM public.sales_leads l
+    JOIN public.sales_companies c ON c.id = l.company_id
+    WHERE lower(c.email) = v_email AND l.pipeline_id = v_pipeline AND l.archived_at IS NULL LIMIT 1;
+  END IF;
+  IF v_lead IS NULL AND v_naam IS NOT NULL THEN
+    SELECT l.id INTO v_lead FROM public.sales_leads l
+    JOIN public.sales_companies c ON c.id = l.company_id
+    WHERE c.dedupe_key = public.harrie_dedupe_key(v_naam, p->>'website')
+      AND c.sales_client_id = v_klant AND l.pipeline_id = v_pipeline AND l.archived_at IS NULL LIMIT 1;
+  END IF;
+
+  IF v_lead IS NULL THEN
+    IF v_naam IS NULL THEN
+      NEW.resultaat := 'geweigerd: zonder bedrijfsnaam kan er geen lead aangemaakt worden';
+      RETURN NEW;
+    END IF;
+    SELECT id INTO v_bedrijf FROM public.sales_companies
+    WHERE sales_client_id = v_klant AND dedupe_key = public.harrie_dedupe_key(v_naam, p->>'website') LIMIT 1;
+    IF v_bedrijf IS NULL THEN
+      INSERT INTO public.sales_companies
+        (sales_client_id, name, website, dedupe_key, city, sector, phone, ondernemingsnummer, country)
+      VALUES (v_klant, v_naam, nullif(btrim(p->>'website'), ''),
+              public.harrie_dedupe_key(v_naam, p->>'website'),
+              nullif(btrim(p->>'city'), ''), nullif(btrim(p->>'sector'), ''),
+              nullif(btrim(p->>'phone'), ''), v_kbo, 'België')
+      RETURNING id INTO v_bedrijf;
+    END IF;
+    INSERT INTO public.sales_contacts (company_id, name, role, email, phone, linkedin, phone_digits)
+    VALUES (v_bedrijf, nullif(btrim(coalesce(p->>'name', p->>'firstName')), ''),
+            nullif(btrim(p->>'role'), ''), v_email, nullif(btrim(p->>'phone'), ''),
+            nullif(btrim(p->>'linkedinUrl'), ''), regexp_replace(coalesce(p->>'phone',''), '\D', '', 'g'))
+    RETURNING id INTO v_contact;
+    INSERT INTO public.sales_leads
+      (sales_client_id, pipeline_id, company_id, contact_id, stage_key, source, labels)
+    VALUES (v_klant, v_pipeline, v_bedrijf, v_contact, 'to_contact', 'harrie', ARRAY['Harrie'])
+    RETURNING id INTO v_lead;
+    v_nieuw := true;
+    v_res := array_append(v_res, 'nieuwe lead aangemaakt');
+  ELSE
+    v_res := array_append(v_res, 'gekoppeld aan bestaande lead');
+  END IF;
+
+  NEW.lead_id := v_lead;
+  SELECT stage_key, warm, reden_code, labels INTO v_huidig, v_warm, v_reden, v_labels
+  FROM public.sales_leads WHERE id = v_lead;
+
+  CASE NEW.type
+    WHEN 'imported' THEN v_fase := 'to_contact'; v_enkelnieuw := true; v_regel := 'Harrie: prospect opgeladen';
+    WHEN 'sent' THEN v_fase := 'contacted_mail'; v_vooruit := true; v_regel := 'Harrie: koude mail verstuurd';
+    WHEN 'linkedin_request' THEN v_fase := 'contacted_linkedin'; v_vooruit := true; v_regel := 'Harrie: LinkedIn-verzoek verstuurd';
+    WHEN 'linkedin_message' THEN v_fase := 'contacted_linkedin'; v_vooruit := true; v_regel := 'Harrie: LinkedIn-bericht verstuurd';
+    WHEN 'replied' THEN v_fase := NULL; v_regel := 'Harrie: prospect reageerde';
+    WHEN 'booked' THEN v_fase := 'appointment'; v_regel := 'Harrie: afspraak geboekt';
+    WHEN 'booking_moved' THEN v_fase := 'appointment'; v_regel := 'Harrie: afspraak verzet';
+    WHEN 'booking_cancelled' THEN
+      v_fase := CASE WHEN v_kanaal ILIKE '%linkedin%' THEN 'contacted_linkedin' ELSE 'contacted_mail' END;
+      v_regel := 'Harrie: afspraak geannuleerd';
+    WHEN 'declined' THEN v_fase := 'not_interested'; v_regel := 'Harrie: prospect zei nee';
+    WHEN 'lost' THEN v_fase := 'not_interested'; v_regel := 'Harrie: afgesloten';
+    WHEN 'unsubscribed' THEN v_fase := NULL; v_regel := 'Harrie: uitgeschreven — niet meer mailen';
+    WHEN 'bounced' THEN v_fase := NULL; v_regel := 'Harrie: e-mailadres bestaat niet';
+    WHEN 'manual_reply' THEN v_fase := NULL; v_regel := 'Harrie: handmatig antwoord';
+    ELSE
+      NEW.resultaat := 'geweigerd: onbekend type ' || coalesce(NEW.type, '?');
+      RETURN NEW;
+  END CASE;
+
+  -- Nooit terugvallen, en een import zet een bestaande lead nooit terug.
+  v_zetfase := v_fase IS NOT NULL AND v_fase <> v_huidig
+    AND NOT (v_enkelnieuw AND NOT v_nieuw)
+    AND NOT (v_vooruit AND public.harrie_stage_rang(v_fase) < public.harrie_stage_rang(v_huidig));
+
+  UPDATE public.sales_leads SET
+    stage_key = CASE WHEN v_zetfase THEN v_fase ELSE stage_key END,
+    warm = CASE WHEN NEW.type = 'replied' OR (blok->>'reageerde')::boolean IS TRUE THEN true ELSE warm END,
+    warm_op = CASE WHEN (NEW.type = 'replied' OR (blok->>'reageerde')::boolean IS TRUE) AND NOT coalesce(warm, false)
+                   THEN now() ELSE warm_op END,
+    reden_code = CASE WHEN NEW.type IN ('declined','lost') AND reden_code IS NULL
+                      THEN public.harrie_reden_code(NEW.detail) ELSE reden_code END,
+    lost_reason = CASE WHEN NEW.type IN ('declined','lost') AND lost_reason IS NULL
+                       THEN coalesce(nullif(btrim(NEW.detail), ''), 'Afgewezen via Harrie') ELSE lost_reason END,
+    do_not_call = CASE WHEN NEW.type = 'unsubscribed' THEN true ELSE do_not_call END,
+    do_not_call_reason = CASE WHEN NEW.type = 'unsubscribed' THEN 'Uitgeschreven via Harrie' ELSE do_not_call_reason END,
+    labels = (SELECT array_agg(DISTINCT x) FROM unnest(
+                coalesce(labels, ARRAY[]::text[]) || ARRAY['Harrie']
+                || CASE WHEN NEW.type = 'bounced' THEN ARRAY['e-mail ongeldig'] ELSE ARRAY[]::text[] END) x),
+    harrie = CASE WHEN NEW.harrie IS NOT NULL THEN NEW.harrie ELSE harrie END
+  WHERE id = v_lead;
+
+  INSERT INTO public.sales_lead_events (lead_id, kind, body, actor_email)
+  VALUES (v_lead, 'system',
+          v_regel || CASE WHEN nullif(btrim(NEW.detail), '') IS NOT NULL THEN ' · ' || btrim(NEW.detail) ELSE '' END,
+          'harrie');
+
+  IF v_zetfase THEN v_res := array_append(v_res, 'fase → ' || v_fase);
+  ELSIF v_fase IS NOT NULL AND v_fase <> v_huidig THEN v_res := array_append(v_res, 'fase blijft ' || v_huidig);
+  END IF;
+  IF NEW.type = 'replied' THEN v_res := array_append(v_res, 'gemarkeerd als warm'); END IF;
+
+  NEW.resultaat := array_to_string(v_res, ', ');
+  RETURN NEW;
+END $fn$;
+
+DROP TRIGGER IF EXISTS trg_harrie_event ON public.harrie_events;
+CREATE TRIGGER trg_harrie_event BEFORE INSERT ON public.harrie_events
+  FOR EACH ROW EXECUTE FUNCTION public.harrie_verwerk_event();
+
+-- PostgREST kent een nieuwe view of kolom pas na een herlading van zijn cache.
+NOTIFY pgrst, 'reload schema';
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- Drie Excel-bestanden vervangen door de app (14 september 2026)
+--   1. MARCO VESTIGINGSPRINCIPE.xlsx  → vesting_* (nieuw contractmodel)
+--   2. BV_transitie_opvolger.xlsx     → bv_* en ez_*
+--   3. Cold_Caller_ROI_Tracker-4.xlsx → sales_appointments.tijdsbelasting
+-- Additief en idempotent. De oude tabellen vesting_config / vesting_revenue
+-- blijven staan: niets wordt gewist.
+-- ══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. Vestigingsprincipe — het contractmodel ─────────────────────────────
+-- Eén rij. Alle drempels en tarieven uit de samenwerkingsovereenkomst staan
+-- hier, zodat de rekenkern geen enkel getal hard hoeft te kennen.
+CREATE TABLE IF NOT EXISTS public.vesting_instellingen (
+  id                    integer PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  max_aandeel_marco     numeric NOT NULL DEFAULT 0.33,
+  vast_aandeel_chiara   numeric NOT NULL DEFAULT 0.33,
+  startaandeel_marco    numeric NOT NULL DEFAULT 0,
+  startaandeel_bram     numeric NOT NULL DEFAULT 0.67,
+  wam_bedrag_per_pct    numeric NOT NULL DEFAULT 5000,
+  wam_max_aandeel       numeric NOT NULL DEFAULT 0.05,
+  regulier_tarief       numeric NOT NULL DEFAULT 5000,   -- € per 1% tot de goedkope grens
+  einde_goedkope_schijf numeric NOT NULL DEFAULT 0.10,   -- totaal aandeel waar het reguliere tarief stopt
+  jaar1_start date NOT NULL DEFAULT '2026-04-01', jaar1_eind date NOT NULL DEFAULT '2027-06-01', jaar1_tarief numeric NOT NULL DEFAULT 10000,
+  jaar2_start date NOT NULL DEFAULT '2027-06-01', jaar2_eind date NOT NULL DEFAULT '2028-06-01', jaar2_tarief numeric NOT NULL DEFAULT 12000,
+  jaar3_start date NOT NULL DEFAULT '2028-06-01', jaar3_eind date NOT NULL DEFAULT '2029-06-01', jaar3_tarief numeric NOT NULL DEFAULT 15000,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO public.vesting_instellingen (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Het contractenregister. De ondertekeningsdatum vergrendelt het jaartarief;
+-- de status bepaalt of de waarde voorlopig, definitief of €0 is.
+CREATE TABLE IF NOT EXISTS public.vesting_contracten (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nr                    text NOT NULL UNIQUE,            -- C-001
+  klant                 text NOT NULL,
+  client_id             uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  ondertekend_op        date NOT NULL,
+  start_dienst          date,
+  einde_dienst          date,
+  dienst                text,                            -- Social media management, Webdesign, …
+  facturatiemodel       text NOT NULL DEFAULT 'maandcontract' CHECK (facturatiemodel IN ('maandcontract','eenmalig')),
+  maandbedrag           numeric,                         -- bij maandcontract
+  duur_maanden          numeric,                         -- bij maandcontract; anders afgeleid
+  handmatige_totaalwaarde numeric,                       -- bij eenmalig project
+  uitgesloten_kosten    numeric NOT NULL DEFAULT 0,
+  status                text NOT NULL DEFAULT 'actief' CHECK (status IN ('actief','voltooid','stopgezet','niet_betaler')),
+  betalingen_op_schema  boolean NOT NULL DEFAULT true,
+  appointment_door_marco boolean NOT NULL DEFAULT false,
+  closed_door_marco     boolean NOT NULL DEFAULT false,
+  laatste_betaalde_maand date,                           -- enkel bij stop / niet-betaler
+  reden_stop            text,
+  notitie               text,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS vesting_contracten_ondertekend ON public.vesting_contracten (ondertekend_op, nr);
+
+-- De WAM-portefeuille: Marco's eigen klanten van vóór de samenwerking. Elke
+-- volledige €5.000 netto ontvangen levert 1% op, tot 5%. Kosten gaan eraf.
+CREATE TABLE IF NOT EXISTS public.vesting_wam (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nr                    text NOT NULL UNIQUE,            -- CW-1
+  klant                 text NOT NULL,
+  contractwaarde        numeric NOT NULL DEFAULT 0,
+  netto_ontvangen       numeric NOT NULL DEFAULT 0,
+  status                text NOT NULL DEFAULT 'actief' CHECK (status IN ('actief','voltooid','stopgezet','niet_betaler')),
+  betalingen_op_schema  boolean NOT NULL DEFAULT true,
+  notitie               text,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.vesting_wam_kosten (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  datum         date,
+  omschrijving  text NOT NULL,
+  bedrag        numeric NOT NULL DEFAULT 0,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.vesting_instellingen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vesting_contracten   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vesting_wam          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vesting_wam_kosten   ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.vesting_instellingen, public.vesting_contracten, public.vesting_wam, public.vesting_wam_kosten FROM anon, authenticated;
+
+-- Beginstand = het Excel-register. Eenmalig; bestaande rijen blijven ongemoeid.
+INSERT INTO public.vesting_contracten
+  (nr, klant, ondertekend_op, start_dienst, einde_dienst, dienst, facturatiemodel, maandbedrag, duur_maanden,
+   handmatige_totaalwaarde, uitgesloten_kosten, status, betalingen_op_schema, appointment_door_marco, closed_door_marco,
+   laatste_betaalde_maand, reden_stop, notitie)
+VALUES
+  ('C-001','Metaalwerken Bartels','2026-05-04','2026-05-04','2026-06-01','Grafisch ontwerp','eenmalig',NULL,1,3744,0,'voltooid',true,true,false,NULL,NULL,
+   'Grafisch ontwerp; prijs staat enkel in aparte offerte en ontbreekt in dit contract — bedrag aanvullen.'),
+  ('C-002','Metaalwerken Bartels','2026-05-04','2026-07-01','2026-12-31','Social media management','maandcontract',979,6,NULL,0,'actief',true,true,false,NULL,NULL,
+   'Social media Groei: 6 maanden × €979 excl. btw.'),
+  ('C-003','TM Technics BV','2026-05-06','2026-05-06','2026-07-01','Webdesign','eenmalig',NULL,2,3200,0,'voltooid',true,true,false,NULL,NULL,
+   'Website Multipager; eenmalige projectvergoeding €3.200 excl. btw.'),
+  ('C-004','YES!talents','2026-05-08','2026-07-01','2026-12-31','Social media management','maandcontract',979,6,NULL,0,'actief',true,true,false,NULL,NULL,
+   'Social media Groei: initiële 6 maanden × €979 excl. btw.'),
+  ('C-005','Remels BV','2026-05-28','2026-07-01','2026-12-31','Social media management','maandcontract',979,6,NULL,0,'stopgezet',true,true,false,'2026-09-01',
+   'Vroegtijdig beëindigd; betaald t.e.m. oktober 2026',
+   '€979 per maand van juni t.e.m. december (7 maanden). Laatste betaalde maand: oktober 2026; daarom volledig €0 in de aandelenpot.'),
+  ('C-006','TM Technics BV','2026-06-02','2026-06-02','2026-12-01','Social media management','maandcontract',979,6,NULL,0,'actief',true,true,false,NULL,NULL,
+   'Social media Groei: 6 maanden × €979 excl. btw; handgeschreven ondertekening 2 juni 2026.')
+ON CONFLICT (nr) DO NOTHING;
+
+INSERT INTO public.vesting_wam (nr, klant, contractwaarde, netto_ontvangen, status, betalingen_op_schema, notitie)
+VALUES ('CW-1','Bistro',5000,5000,'voltooid',true,'Website voor Bistri')
+ON CONFLICT (nr) DO NOTHING;
+
+INSERT INTO public.vesting_wam_kosten (datum, omschrijving, bedrag)
+SELECT '2026-10-01','Afsluitkosten boekhouding',3000
+WHERE NOT EXISTS (SELECT 1 FROM public.vesting_wam_kosten WHERE omschrijving = 'Afsluitkosten boekhouding');
+
+-- ── 2. BV-transitie ───────────────────────────────────────────────────────
+-- Wat staat er per zaakvoerder nog persoonlijk te goed in de BV, wat heeft
+-- de BV voor iemand privé gedragen, en hoe wordt de gezamenlijke winst van de
+-- overgangsmaanden verdeeld. Plus een raming van sociale bijdragen en
+-- personenbelasting per eenmanszaak.
+CREATE TABLE IF NOT EXISTS public.bv_rechten (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  datum         date NOT NULL,
+  persoon       text NOT NULL CHECK (persoon IN ('bram','chiara','marco')),
+  type          text NOT NULL CHECK (type IN ('factuur_bv_ez','prive_voordeel','terugbetaling','correctie')),
+  omschrijving  text,
+  bedrag_excl   numeric NOT NULL,
+  richting      smallint NOT NULL DEFAULT 1 CHECK (richting IN (1,-1)),
+  bewijs        text,
+  notitie       text,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.bv_kosten (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  datum           date NOT NULL,
+  leverancier     text,
+  categorie       text,
+  omschrijving    text,
+  bedrag_excl     numeric NOT NULL,
+  btw_pct         numeric NOT NULL DEFAULT 21,
+  betaald_door    text NOT NULL DEFAULT 'bv' CHECK (betaald_door IN ('bv','bram_prive','chiara_prive','marco_prive')),
+  verrekenen_met  text CHECK (verrekenen_met IN ('bram','chiara','marco')),
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.bv_winstverdeling (
+  persoon                 text PRIMARY KEY CHECK (persoon IN ('bram','chiara','marco')),
+  ontvangen_op_rekening   numeric NOT NULL DEFAULT 0,
+  nog_te_ontvangen        numeric NOT NULL DEFAULT 0,
+  zakelijke_kosten_betaald numeric NOT NULL DEFAULT 0,
+  prive_gebruikt          numeric NOT NULL DEFAULT 0,
+  al_ontvangen            numeric NOT NULL DEFAULT 0,
+  updated_at              timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.ez_fiscaal (
+  persoon           text NOT NULL CHECK (persoon IN ('bram','chiara','marco')),
+  jaar              integer NOT NULL,
+  winst             numeric NOT NULL DEFAULT 0,      -- boekhoudkundige winst vóór sociale bijdragen
+  andere_inkomsten  numeric NOT NULL DEFAULT 0,
+  aftrekken         numeric NOT NULL DEFAULT 0,
+  statuut           text NOT NULL DEFAULT 'bijberoep' CHECK (statuut IN ('hoofdberoep','bijberoep','primostarter')),
+  kwartalen         integer NOT NULL DEFAULT 4,
+  updated_at        timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (persoon, jaar)
+);
+CREATE TABLE IF NOT EXISTS public.ez_aannames (
+  jaar                    integer PRIMARY KEY,
+  gemeentebelasting       numeric NOT NULL DEFAULT 0.07,
+  beheerskost_fonds       numeric NOT NULL DEFAULT 0.0305,
+  soc_laag                numeric NOT NULL DEFAULT 0.205,
+  soc_hoog                numeric NOT NULL DEFAULT 0.1416,
+  soc_grens1              numeric NOT NULL DEFAULT 75024.54,
+  soc_grens2              numeric NOT NULL DEFAULT 110562.42,
+  min_jaarbijdrage_hoofd  numeric NOT NULL DEFAULT 3561.68,
+  vrijstelling_bijberoep  numeric NOT NULL DEFAULT 1922.16,
+  belastingvrije_som      numeric NOT NULL DEFAULT 11180,
+  schijf1_grens           numeric NOT NULL DEFAULT 16720,
+  schijf1_tarief          numeric NOT NULL DEFAULT 0.25,
+  schijf2_grens           numeric NOT NULL DEFAULT 29510,
+  schijf2_tarief          numeric NOT NULL DEFAULT 0.40,
+  schijf3_grens           numeric NOT NULL DEFAULT 51070,
+  schijf3_tarief          numeric NOT NULL DEFAULT 0.45,
+  schijf4_tarief          numeric NOT NULL DEFAULT 0.50,
+  updated_at              timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.bv_rechten       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bv_kosten        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bv_winstverdeling ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ez_fiscaal       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ez_aannames      ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.bv_rechten, public.bv_kosten, public.bv_winstverdeling, public.ez_fiscaal, public.ez_aannames FROM anon, authenticated;
+
+-- Beginstand uit het Excel.
+INSERT INTO public.bv_rechten (datum, persoon, type, omschrijving, bedrag_excl, richting, bewijs, notitie)
+SELECT * FROM (VALUES
+  ('2026-10-01'::date,'bram','factuur_bv_ez','Factuur van de BV -> EZ, waar Bram nog recht op heeft',20000::numeric,1::smallint,'F-12039','Dit zijn winsten geboekt in de EZ, die gefactureerd zijn geweest voor in boekhouding van de BV'),
+  ('2026-10-01','chiara','factuur_bv_ez','Factuur van de BV -> EZ, waar Chiara nog recht op heeft',300,1,'F-92839','Dit zijn winsten geboekt in de EZ, die gefactureerd zijn geweest voor in boekhouding van de BV'),
+  ('2026-10-01','marco','factuur_bv_ez','Factuur van de BV -> EZ, waar Marco nog recht op heeft',4000,1,NULL,'Dit zijn winsten geboekt in de EZ, die gefactureerd zijn geweest voor in boekhouding van de BV')
+) v(datum, persoon, type, omschrijving, bedrag_excl, richting, bewijs, notitie)
+WHERE NOT EXISTS (SELECT 1 FROM public.bv_rechten);
+
+INSERT INTO public.bv_kosten (datum, leverancier, categorie, omschrijving, bedrag_excl, btw_pct, betaald_door, verrekenen_met)
+SELECT * FROM (VALUES
+  ('2026-10-01'::date,'Kurt Walmagh','Auto / huur','Maandelijkse huur lichte vracht',250::numeric,21::numeric,'bv','bram'),
+  ('2026-10-01','Kurt Walmagh','Auto / huur','Maandelijkse huur lichte vracht',250,21,'bv','chiara')
+) v(datum, leverancier, categorie, omschrijving, bedrag_excl, btw_pct, betaald_door, verrekenen_met)
+WHERE NOT EXISTS (SELECT 1 FROM public.bv_kosten);
+
+INSERT INTO public.bv_winstverdeling (persoon) VALUES ('bram'),('chiara'),('marco') ON CONFLICT DO NOTHING;
+
+INSERT INTO public.ez_fiscaal (persoon, jaar, winst, statuut, kwartalen) VALUES
+  ('bram',2026,35012,'bijberoep',4), ('chiara',2026,8277,'bijberoep',4), ('marco',2026,7824,'bijberoep',4)
+ON CONFLICT DO NOTHING;
+INSERT INTO public.ez_aannames (jaar) VALUES (2026) ON CONFLICT DO NOTHING;
+
+-- ── 3. Cold caller ROI — tijdsbelasting per gewonnen deal ─────────────────
+-- 1 = zeer laag … 5 = zeer hoog. Weegt de projectwaarde af tegen hoeveel werk
+-- de uitvoering vraagt (factor 1 / 0,9 / 0,75 / 0,6 / 0,4).
+ALTER TABLE public.sales_appointments ADD COLUMN IF NOT EXISTS tijdsbelasting smallint CHECK (tijdsbelasting BETWEEN 1 AND 5);
+
+-- ── WAM-portefeuille: contract, facturatieschema en betaalopvolging ──────────
+ALTER TABLE public.vesting_wam
+  ADD COLUMN IF NOT EXISTS client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS start_datum date,
+  ADD COLUMN IF NOT EXISTS contract_maanden integer,
+  ADD COLUMN IF NOT EXISTS bedrag_per_factuur numeric,
+  ADD COLUMN IF NOT EXISTS frequentie text CHECK (frequentie IN ('maandelijks','kwartaal','halfjaar','jaarlijks','eenmalig')),
+  ADD COLUMN IF NOT EXISTS btw_pct numeric NOT NULL DEFAULT 21,
+  ADD COLUMN IF NOT EXISTS omschrijving text;
+
+-- Eén rij per te factureren termijn. Gepland → gefactureerd (er is een echte
+-- factuur + ClickUp-taak) → betaald. Betaald wordt HIER bijgehouden en niet
+-- in de Facturen-module: die volgt bewust enkel het versturen, maar de vesting
+-- draait op wat er effectief binnenkomt.
+CREATE TABLE IF NOT EXISTS public.vesting_wam_termijnen (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  wam_id          uuid NOT NULL REFERENCES public.vesting_wam(id) ON DELETE CASCADE,
+  volgnr          integer NOT NULL,
+  periode         text NOT NULL,
+  factuurdatum    date NOT NULL,
+  bedrag_excl     numeric NOT NULL DEFAULT 0,
+  btw_pct         numeric NOT NULL DEFAULT 21,
+  status          text NOT NULL DEFAULT 'gepland' CHECK (status IN ('gepland','gefactureerd','betaald','geannuleerd')),
+  betaald_op      date,
+  invoice_id      uuid REFERENCES public.invoices(id) ON DELETE SET NULL,
+  clickup_task_id text,
+  notitie         text,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (wam_id, volgnr)
+);
+ALTER TABLE public.vesting_wam_termijnen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.vesting_wam_termijnen FROM anon, authenticated;
+
+-- Een factuur weet van welke WAM-termijn hij komt (soort 'wam' in Facturen).
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS wam_id uuid REFERENCES public.vesting_wam(id) ON DELETE SET NULL;
+
+-- ── Vestingcontract ↔ Contractenmodule ─────────────────────────────────────
+ALTER TABLE public.vesting_contracten ADD COLUMN IF NOT EXISTS contract_id uuid REFERENCES public.contracts(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS vesting_contracten_contract ON public.vesting_contracten (contract_id) WHERE contract_id IS NOT NULL;
+
+-- ── Contract ondertekend → facturatieopdrachten → ClickUp ─────────────────
+-- Eén rij per facturatiemoment van een ondertekend contract. Geen factuur
+-- (die maakt het team in Facturen), wél de opdracht om ze te maken, met de
+-- synchronisatie naar ClickUp. Uniek per contract + factuurdatum + type: een
+-- herhaalde verwerking kan nooit een tweede opdracht opleveren.
+CREATE TABLE IF NOT EXISTS public.contract_facturatie_opdrachten (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+  client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  volgnr integer NOT NULL DEFAULT 1,
+  aantal integer NOT NULL DEFAULT 1,
+  type text NOT NULL DEFAULT 'volledig' CHECK (type IN ('voorschot','saldo','periodiek','volledig')),
+  factuurdatum date NOT NULL,
+  periode text,
+  bedrag_excl numeric,
+  btw_pct numeric NOT NULL DEFAULT 21,
+  bedrag_incl numeric,
+  omschrijving text,
+  betalingstermijn_dagen integer,
+  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open','controle_vereist','afgehandeld','geannuleerd')),
+  ontbrekend text[] NOT NULL DEFAULT '{}',
+  aandachtspunten text[] NOT NULL DEFAULT '{}',
+  sync_status text NOT NULL DEFAULT 'in_afwachting' CHECK (sync_status IN ('in_afwachting','gesynchroniseerd','mislukt','controle_vereist')),
+  clickup_task_id text,
+  clickup_url text,
+  sync_fout text,
+  sync_pogingen integer NOT NULL DEFAULT 0,
+  laatste_sync_op timestamptz,
+  sync_bezig_sinds timestamptz,
+  vingerafdruk text,
+  invoice_id uuid REFERENCES public.invoices(id) ON DELETE SET NULL,
+  bron text NOT NULL DEFAULT 'automatisch',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (contract_id, factuurdatum, type)
+);
+CREATE INDEX IF NOT EXISTS contract_facturatie_opdrachten_contract ON public.contract_facturatie_opdrachten (contract_id);
+CREATE INDEX IF NOT EXISTS contract_facturatie_opdrachten_sync ON public.contract_facturatie_opdrachten (sync_status) WHERE sync_status IN ('in_afwachting','mislukt');
+ALTER TABLE public.contract_facturatie_opdrachten ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.contract_facturatie_opdrachten FROM anon, authenticated;
+
+-- Technische log: wat is er wanneer gebeurd, met welke uitkomst.
+CREATE TABLE IF NOT EXISTS public.contract_facturatie_log (
+  id bigserial PRIMARY KEY,
+  contract_id uuid,
+  opdracht_id uuid,
+  gebeurtenis text NOT NULL,
+  contractstatus text,
+  verwerking_sleutel text,
+  clickup_task_id text,
+  sync_status text,
+  fout text,
+  poging integer,
+  details jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS contract_facturatie_log_contract ON public.contract_facturatie_log (contract_id, created_at DESC);
+ALTER TABLE public.contract_facturatie_log ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.contract_facturatie_log FROM anon, authenticated;
+
+-- ── Factuurlijnen, directe kosten en winst per factuur ─────────────────────
+-- De klantfactuur (amount_excl/amount_incl) blijft wat ze is. Dit is de
+-- interne laag eronder: welke lijnen zitten erin, welke kosten hebben we
+-- ervoor gemaakt, en wat is dan de werkelijke winst die meetelt.
+CREATE TABLE IF NOT EXISTS public.invoice_lines (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_id uuid REFERENCES public.invoices(id) ON DELETE CASCADE,
+  recurring_id uuid REFERENCES public.recurring_invoices(id) ON DELETE CASCADE,
+  volgnr integer NOT NULL DEFAULT 1,
+  omschrijving text NOT NULL,
+  aantal numeric NOT NULL DEFAULT 1,
+  prijs_excl numeric NOT NULL DEFAULT 0,
+  btw_pct numeric NOT NULL DEFAULT 21,
+  classificatie text NOT NULL DEFAULT 'dienst' CHECK (classificatie IN ('dienst','doorgerekende_kost','gemengd')),
+  opmerking text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK ((invoice_id IS NOT NULL)::int + (recurring_id IS NOT NULL)::int = 1)
+);
+CREATE INDEX IF NOT EXISTS invoice_lines_invoice ON public.invoice_lines (invoice_id);
+CREATE INDEX IF NOT EXISTS invoice_lines_recurring ON public.invoice_lines (recurring_id);
+ALTER TABLE public.invoice_lines ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.invoice_lines FROM anon, authenticated;
+
+-- Eén kost = één record, aan een factuur (of een maand van een recurring
+-- factuur) en optioneel aan één lijn. Nooit aan beide: zo telt ze één keer.
+CREATE TABLE IF NOT EXISTS public.invoice_costs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_id uuid REFERENCES public.invoices(id) ON DELETE CASCADE,
+  recurring_id uuid REFERENCES public.recurring_invoices(id) ON DELETE CASCADE,
+  maand text,
+  line_id uuid REFERENCES public.invoice_lines(id) ON DELETE SET NULL,
+  omschrijving text NOT NULL,
+  categorie text,
+  leverancier text,
+  kostprijs_excl numeric,
+  datum date,
+  bewijs_url text,
+  opmerking text,
+  status text NOT NULL DEFAULT 'actief' CHECK (status IN ('actief','geannuleerd')),
+  created_by uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK ((invoice_id IS NOT NULL)::int + (recurring_id IS NOT NULL)::int = 1),
+  CHECK (recurring_id IS NULL OR maand ~ '^\d{4}-\d{2}$')
+);
+CREATE INDEX IF NOT EXISTS invoice_costs_invoice ON public.invoice_costs (invoice_id);
+CREATE INDEX IF NOT EXISTS invoice_costs_recurring ON public.invoice_costs (recurring_id, maand);
+ALTER TABLE public.invoice_costs ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.invoice_costs FROM anon, authenticated;
+
+-- Auditgeschiedenis: wie, wanneer, oud, nieuw, effect.
+CREATE TABLE IF NOT EXISTS public.invoice_cost_log (
+  id bigserial PRIMARY KEY,
+  invoice_id uuid,
+  recurring_id uuid,
+  maand text,
+  line_id uuid,
+  cost_id uuid,
+  actie text NOT NULL,
+  oud jsonb,
+  nieuw jsonb,
+  effect_winst numeric,
+  effect_vesting numeric,
+  reden text,
+  actor_user_id uuid,
+  actor_email text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS invoice_cost_log_invoice ON public.invoice_cost_log (invoice_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS invoice_cost_log_recurring ON public.invoice_cost_log (recurring_id, maand, created_at DESC);
+ALTER TABLE public.invoice_cost_log ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.invoice_cost_log FROM anon, authenticated;
+
+-- Expliciete bevestiging "geen directe kosten" (nooit aangenomen).
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS geen_directe_kosten_bevestigd_op timestamptz;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS geen_directe_kosten_bevestigd_op timestamptz;
+
+-- ── Aankopen: aanvraagnummer, versies, soft-delete, bewijsdocument ─────────
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS reference text;
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS version integer NOT NULL DEFAULT 1;
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS deleted_by_email text;
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS deleted_by_user_id uuid;
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS confirmed_at timestamptz;
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS confirmed_by_email text;
+CREATE UNIQUE INDEX IF NOT EXISTS purchases_reference_uniek ON public.purchases (reference) WHERE reference IS NOT NULL;
+CREATE INDEX IF NOT EXISTS purchases_deleted ON public.purchases (deleted_at) WHERE deleted_at IS NOT NULL;
+
+-- Tellers per soort en jaar (AA-2026-001 voor aanvragen, BEV-2026-001 voor bewijsdocumenten).
+CREATE TABLE IF NOT EXISTS public.purchase_counters (
+  soort text NOT NULL,
+  jaar integer NOT NULL,
+  laatste integer NOT NULL DEFAULT 0,
+  PRIMARY KEY (soort, jaar)
+);
+ALTER TABLE public.purchase_counters ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.purchase_counters FROM anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.volgend_purchase_nummer(p_soort text, p_jaar integer)
+RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  INSERT INTO public.purchase_counters (soort, jaar, laatste) VALUES (p_soort, p_jaar, 1)
+  ON CONFLICT (soort, jaar) DO UPDATE SET laatste = public.purchase_counters.laatste + 1
+  RETURNING laatste;
+$$;
+REVOKE ALL ON FUNCTION public.volgend_purchase_nummer(text, integer) FROM public, anon, authenticated;
+
+-- Bestaande aanvragen krijgen alsnog een nummer, in volgorde van aanmaak.
+DO $$
+DECLARE r record; n integer;
+BEGIN
+  FOR r IN SELECT id, created_at FROM public.purchases WHERE reference IS NULL ORDER BY created_at, id LOOP
+    n := public.volgend_purchase_nummer('aanvraag', EXTRACT(YEAR FROM r.created_at)::int);
+    UPDATE public.purchases SET reference = 'AA-' || EXTRACT(YEAR FROM r.created_at)::int || '-' || lpad(n::text, 3, '0') WHERE id = r.id;
+  END LOOP;
+END $$;
+
+CREATE TABLE IF NOT EXISTS public.purchase_versions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  purchase_id uuid NOT NULL REFERENCES public.purchases(id) ON DELETE CASCADE,
+  version integer NOT NULL,
+  snapshot jsonb NOT NULL,
+  reden text,
+  created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (purchase_id, version)
+);
+ALTER TABLE public.purchase_versions ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.purchase_versions FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.purchase_edits (
+  id bigserial PRIMARY KEY,
+  purchase_id uuid NOT NULL REFERENCES public.purchases(id) ON DELETE CASCADE,
+  version integer,
+  actie text NOT NULL,
+  actor_user_id uuid,
+  actor_email text,
+  oud jsonb,
+  nieuw jsonb,
+  opmerking text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS purchase_edits_purchase ON public.purchase_edits (purchase_id, created_at DESC);
+ALTER TABLE public.purchase_edits ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.purchase_edits FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.purchase_certificates (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  purchase_id uuid NOT NULL REFERENCES public.purchases(id) ON DELETE CASCADE,
+  version integer NOT NULL,
+  certificate_no text NOT NULL UNIQUE,
+  storage_path text NOT NULL,
+  file_name text NOT NULL,
+  status text NOT NULL DEFAULT 'actueel' CHECK (status IN ('actueel','vervangen')),
+  sha256 text,
+  confirmed_at timestamptz NOT NULL,
+  confirmed_by_email text,
+  generated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (purchase_id, version)
+);
+CREATE INDEX IF NOT EXISTS purchase_certificates_purchase ON public.purchase_certificates (purchase_id);
+ALTER TABLE public.purchase_certificates ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.purchase_certificates FROM anon, authenticated;
+
+-- ── Centrale instellingen ───────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.app_settings (
+  key text PRIMARY KEY,
+  value jsonb NOT NULL DEFAULT '{}'::jsonb,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by_email text
+);
+ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.app_settings FROM anon, authenticated;
+
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS voornaam text;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS achternaam text;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS functie text;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS rol text NOT NULL DEFAULT 'medewerker';
+DO $$ BEGIN
+  ALTER TABLE public.staff_members ADD CONSTRAINT staff_members_rol_check CHECK (rol IN ('beheerder','medewerker','alleen_lezen'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS public.gebruikers_voorkeuren (
+  auth_user_id uuid PRIMARY KEY,
+  verborgen_modules text[] NOT NULL DEFAULT '{}',
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.gebruikers_voorkeuren ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.gebruikers_voorkeuren FROM anon, authenticated;
+
+-- Medewerkers: archiveren i.p.v. definitief verwijderen + uitnodiging op vraag
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS verwijderd_at timestamptz;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS uitnodiging_verzonden_at timestamptz;
+
+-- ── ClickUp-taakregister: enkel taken die de app zelf kent mogen bij reconciliatie weg ──
+CREATE TABLE IF NOT EXISTS public.clickup_taak_register (
+  task_id text PRIMARY KEY,
+  client_id uuid,
+  item_id uuid,
+  bron text NOT NULL DEFAULT 'content',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS clickup_taak_register_client ON public.clickup_taak_register (client_id);
+ALTER TABLE public.clickup_taak_register ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.clickup_taak_register FROM anon, authenticated;
+INSERT INTO public.clickup_taak_register (task_id, client_id, item_id, bron)
+SELECT clickup_task_id, client_id, id, 'content' FROM public.social_content_items
+WHERE clickup_task_id IS NOT NULL
+ON CONFLICT (task_id) DO NOTHING;
+
+-- ── Facturatieplanner: terugkerende facturaties stopzetten i.p.v. wissen; momentopname per maand ──
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS deleted_by_email text;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS billing_date date;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS amount_excl numeric;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS vat_pct numeric;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS amount_incl numeric;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS invoice_id uuid;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS cancelled_at timestamptz;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS cancelled_by_email text;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS note text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS cancelled_at timestamptz;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS cancelled_by_email text;
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS geannuleerd_op timestamptz;
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS geannuleerd_door text;
+CREATE INDEX IF NOT EXISTS idx_invoices_invoice_date ON public.invoices (invoice_date);
+CREATE INDEX IF NOT EXISTS idx_cfo_factuurdatum ON public.contract_facturatie_opdrachten (factuurdatum);
+
+-- Indexen op foreign keys van de facturatietabellen (adviezen Supabase, 16 sep 2026)
+CREATE INDEX IF NOT EXISTS idx_invoices_client ON public.invoices (client_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_wam ON public.invoices (wam_id);
+CREATE INDEX IF NOT EXISTS idx_recurring_invoices_client ON public.recurring_invoices (client_id);
+CREATE INDEX IF NOT EXISTS idx_recurring_invoices_revenue ON public.recurring_invoices (revenue_id);
+CREATE INDEX IF NOT EXISTS idx_invoice_costs_line ON public.invoice_costs (line_id);
+CREATE INDEX IF NOT EXISTS idx_cfo_client ON public.contract_facturatie_opdrachten (client_id);
+CREATE INDEX IF NOT EXISTS idx_cfo_invoice ON public.contract_facturatie_opdrachten (invoice_id);
+
+-- ── Opdrachten: volledige statusflow (voorstel → contract → uitvoering → facturatie)
+--    + koppelingen met contract, factuur en lead (18 sep 2026) ───────────────
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS contract_id uuid REFERENCES public.contracts(id) ON DELETE SET NULL;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS invoice_id uuid REFERENCES public.invoices(id) ON DELETE SET NULL;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS lead_id uuid REFERENCES public.sales_leads(id) ON DELETE SET NULL;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS status_bron text;            -- 'handmatig' | 'automatisch'
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS auto_status text;            -- laatst afgeleide status (contract/factuur), om niet te blijven overschrijven
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS status_gewijzigd_op timestamptz;
+ALTER TABLE public.opdrachten DROP CONSTRAINT IF EXISTS opdrachten_status_check;
+ALTER TABLE public.opdrachten ADD CONSTRAINT opdrachten_status_check CHECK (status = ANY (ARRAY[
+  'open','voorstel_gevraagd','voorstel_bezig','voorstel_klaar','voorstel_voorgelegd','interesse','geen_interesse',
+  'contract_verstuurd','getekend','bezig','wacht','opgeleverd','te_factureren','factuur_verstuurd','betaald',
+  'afgerond','geannuleerd']));
+CREATE INDEX IF NOT EXISTS idx_opdrachten_contract ON public.opdrachten (contract_id);
+CREATE INDEX IF NOT EXISTS idx_opdrachten_invoice ON public.opdrachten (invoice_id);
+CREATE INDEX IF NOT EXISTS idx_opdrachten_lead ON public.opdrachten (lead_id);
+CREATE INDEX IF NOT EXISTS idx_opdrachten_status ON public.opdrachten (status);
+
+-- ── Opdrachten: waarde van de opdracht (excl. btw) voor het verslag bovenaan (18 sep 2026)
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS bedrag_excl numeric(12,2);
+
+-- ── Contractarchief: beschermde, onveranderlijke kopie van elk ondertekend
+--    contract (getekende PDF + ondertekeningscertificaat + dossier.json) in de
+--    privébucket contract-archief, met een register dat niet gewijzigd of
+--    gewist kan worden (21 sep 2026) ────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.contract_archief (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.contracts(id) ON DELETE RESTRICT,
+  versie integer NOT NULL DEFAULT 1,
+  bron text NOT NULL,                                -- tekenlink | upload_getekend | backfill | handmatig
+  titel text,
+  klant_naam text,
+  signer_name text,
+  signer_email text,
+  signed_at timestamptz,
+  sha256_contract text NOT NULL,
+  sha256_certificaat text NOT NULL,
+  pad_contract text NOT NULL,
+  pad_certificaat text NOT NULL,
+  pad_dossier text NOT NULL,
+  dossier jsonb NOT NULL DEFAULT '{}'::jsonb,
+  gearchiveerd_op timestamptz NOT NULL DEFAULT now(),
+  gearchiveerd_door text,
+  UNIQUE (contract_id, versie)
+);
+CREATE INDEX IF NOT EXISTS idx_contract_archief_contract ON public.contract_archief (contract_id);
+ALTER TABLE public.contract_archief ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.contract_archief FROM anon, authenticated;
+CREATE OR REPLACE FUNCTION public.contract_archief_onveranderlijk() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'Het contractarchief is onveranderlijk: rijen kunnen niet gewijzigd of gewist worden.';
+END $$;
+DROP TRIGGER IF EXISTS trg_contract_archief_onveranderlijk ON public.contract_archief;
+CREATE TRIGGER trg_contract_archief_onveranderlijk BEFORE UPDATE OR DELETE ON public.contract_archief
+  FOR EACH ROW EXECUTE FUNCTION public.contract_archief_onveranderlijk();
+INSERT INTO storage.buckets (id, name, public) VALUES ('contract-archief', 'contract-archief', false) ON CONFLICT (id) DO NOTHING;
+
+-- ── Contract → factuurvoorstel → bevestigde facturen (21 sep 2026) ────────────
+-- Facturen: verzend- en betaalstatus apart, vervaldatum, referentie, valuta,
+-- contractueel deel, reden bij annulering/creditering. Regels: artikel,
+-- eenheid, korting, extra kost. Wijzigingshistoriek per factuur. Voorstellen
+-- (contract_facturatie_opdrachten) met regels en de bron per veld, en een
+-- databankfunctie die de bevestiging in één transactie uitvoert.
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS due_date date;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS payment_term_days integer;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS reference text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS currency text NOT NULL DEFAULT 'EUR';
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS periode text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS sent_at timestamptz;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS betaalstatus text NOT NULL DEFAULT 'niet_betaald';
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS betaald_bedrag numeric(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS betaald_op date;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS credited_at timestamptz;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS status_reden text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS contract_bedrag_excl numeric(12,2);
+-- Een eventuele statuscontrole op invoices zou 'gecrediteerd' weigeren; de app bewaakt de statussen.
+DO $$ DECLARE c text; BEGIN
+  SELECT conname INTO c FROM pg_constraint WHERE conrelid = 'public.invoices'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) ILIKE '%status%' LIMIT 1;
+  IF c IS NOT NULL THEN EXECUTE format('ALTER TABLE public.invoices DROP CONSTRAINT %I', c); END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_invoices_due_date ON public.invoices (due_date);
+CREATE INDEX IF NOT EXISTS idx_invoices_betaalstatus ON public.invoices (betaalstatus);
+
+ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS artikel text;
+ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS eenheid text NOT NULL DEFAULT 'stuk';
+ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS korting_pct numeric(6,2) NOT NULL DEFAULT 0;
+ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS is_extra boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS idx_invoice_lines_invoice ON public.invoice_lines (invoice_id);
+
+CREATE TABLE IF NOT EXISTS public.invoice_wijzigingen (
+  id bigserial PRIMARY KEY,
+  invoice_id uuid NOT NULL REFERENCES public.invoices(id) ON DELETE CASCADE,
+  actie text NOT NULL,                 -- aangemaakt | aangepast | verplaatst | verstuurd | geannuleerd | gecrediteerd | betaalstatus | bevestigd
+  veld text,
+  oud text,
+  nieuw text,
+  reden text,
+  actor_email text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_wijzigingen_invoice ON public.invoice_wijzigingen (invoice_id, created_at DESC);
+ALTER TABLE public.invoice_wijzigingen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.invoice_wijzigingen FROM anon, authenticated;
+
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS regels jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS bron_velden jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS handmatig_gewijzigd boolean NOT NULL DEFAULT false;
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS bevestigd_op timestamptz;
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS bevestigd_door text;
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS vervaldatum date;
+-- Twee voorstellen op dezelfde dag (bv. een extra factuur ervoor of erna) moeten kunnen.
+ALTER TABLE public.contract_facturatie_opdrachten DROP CONSTRAINT IF EXISTS contract_facturatie_opdrachte_contract_id_factuurdatum_type_key;
+
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS facturatie_bevestigd_op timestamptz;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS facturatie_gewijzigd_na_bevestiging boolean NOT NULL DEFAULT false;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS facturatie_gestopt_op date;
+
+-- De bevestiging: alle open voorstellen van een contract in één transactie
+-- omzetten naar facturen (+ regels). Idempotent: een voorstel met invoice_id
+-- wordt overgeslagen, en de rijen worden vergrendeld zodat een dubbele klik
+-- geen dubbele facturen kan maken. Mislukt er iets, dan wordt niets aangemaakt.
+CREATE OR REPLACE FUNCTION public.bevestig_factuurplanning(p_contract_id uuid, p_actor_id uuid, p_actor_email text, p_ids uuid[] DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  r record; l jsonb; v_inv uuid; v_aangemaakt int := 0; v_overgeslagen int := 0; v_ids uuid[] := '{}';
+  v_volgnr int; v_excl numeric; v_btw numeric; v_incl numeric; v_titel text; v_client uuid; v_service text; v_termijn int;
+  v_r_excl numeric; v_r_btw numeric;
+BEGIN
+  SELECT client_id, service_slug, title INTO v_client, v_service, v_titel FROM contracts WHERE id = p_contract_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Contract niet gevonden.'; END IF;
+
+  FOR r IN
+    SELECT * FROM contract_facturatie_opdrachten
+    WHERE contract_id = p_contract_id AND (p_ids IS NULL OR id = ANY(p_ids))
+    ORDER BY factuurdatum, volgnr FOR UPDATE
+  LOOP
+    IF r.invoice_id IS NOT NULL OR r.status IN ('afgehandeld', 'geannuleerd') THEN
+      v_overgeslagen := v_overgeslagen + 1; CONTINUE;
+    END IF;
+    IF r.status = 'controle_vereist' THEN
+      RAISE EXCEPTION 'Voorstel % (%) vereist nog controle. Vul de ontbrekende gegevens in en markeer het als gecontroleerd.', r.volgnr, to_char(r.factuurdatum, 'DD/MM/YYYY');
+    END IF;
+    IF coalesce(r.client_id, v_client) IS NULL THEN RAISE EXCEPTION 'Er is geen klant gekoppeld aan dit contract.'; END IF;
+    IF r.omschrijving IS NULL OR btrim(r.omschrijving) = '' THEN RAISE EXCEPTION 'Voorstel % heeft geen omschrijving.', r.volgnr; END IF;
+
+    -- Bedrag: uit de regels als die er zijn (in centen gerekend), anders het losse bedrag.
+    v_excl := 0; v_btw := 0;
+    IF r.regels IS NOT NULL AND jsonb_typeof(r.regels) = 'array' AND jsonb_array_length(r.regels) > 0 THEN
+      FOR l IN SELECT * FROM jsonb_array_elements(r.regels) LOOP
+        v_r_excl := round(coalesce((l->>'aantal')::numeric, 1) * coalesce((l->>'prijs_excl')::numeric, 0) * (1 - least(100, greatest(0, coalesce((l->>'korting_pct')::numeric, 0))) / 100), 2);
+        v_r_btw := round(v_r_excl * coalesce((l->>'btw_pct')::numeric, coalesce(r.btw_pct, 21)) / 100, 2);
+        v_excl := v_excl + v_r_excl; v_btw := v_btw + v_r_btw;
+      END LOOP;
+    ELSE
+      v_excl := round(coalesce(r.bedrag_excl, 0), 2);
+      v_btw := round(v_excl * coalesce(r.btw_pct, 21) / 100, 2);
+    END IF;
+    IF v_excl <= 0 THEN RAISE EXCEPTION 'Voorstel % (%) heeft geen bedrag.', r.volgnr, to_char(r.factuurdatum, 'DD/MM/YYYY'); END IF;
+    v_incl := v_excl + v_btw;
+    v_termijn := coalesce(r.betalingstermijn_dagen, 30);
+
+    INSERT INTO invoices (client_id, service_slug, invoice_month, invoice_date, description, amount_excl, vat_pct, amount_incl, status,
+                          contract_id, created_by, kind, source, due_date, payment_term_days, contract_bedrag_excl, periode, currency, betaalstatus, betaald_bedrag)
+    VALUES (coalesce(r.client_id, v_client), v_service, coalesce(r.periode, to_char(r.factuurdatum, 'YYYY-MM')), r.factuurdatum, r.omschrijving,
+            v_excl, coalesce(r.btw_pct, 21), v_incl, 'te_versturen',
+            p_contract_id, p_actor_id, 'client', 'contract', coalesce(r.vervaldatum, r.factuurdatum + v_termijn), v_termijn,
+            (SELECT coalesce(sum(round(coalesce((x->>'aantal')::numeric, 1) * coalesce((x->>'prijs_excl')::numeric, 0) * (1 - least(100, greatest(0, coalesce((x->>'korting_pct')::numeric, 0))) / 100), 2)), v_excl)
+               FROM jsonb_array_elements(CASE WHEN jsonb_typeof(r.regels) = 'array' AND jsonb_array_length(r.regels) > 0 THEN r.regels ELSE '[]'::jsonb END) x
+               WHERE coalesce((x->>'is_extra')::boolean, false) = false),
+            r.periode, 'EUR', 'niet_betaald', 0)
+    RETURNING id INTO v_inv;
+
+    v_volgnr := 0;
+    IF r.regels IS NOT NULL AND jsonb_typeof(r.regels) = 'array' AND jsonb_array_length(r.regels) > 0 THEN
+      FOR l IN SELECT * FROM jsonb_array_elements(r.regels) LOOP
+        v_volgnr := v_volgnr + 1;
+        INSERT INTO invoice_lines (invoice_id, volgnr, omschrijving, artikel, aantal, eenheid, prijs_excl, btw_pct, korting_pct, is_extra, classificatie, opmerking)
+        VALUES (v_inv, v_volgnr, coalesce(nullif(l->>'omschrijving', ''), nullif(l->>'artikel', ''), r.omschrijving), nullif(l->>'artikel', ''),
+                coalesce((l->>'aantal')::numeric, 1), coalesce(nullif(l->>'eenheid', ''), 'stuk'), coalesce((l->>'prijs_excl')::numeric, 0),
+                coalesce((l->>'btw_pct')::numeric, coalesce(r.btw_pct, 21)), coalesce((l->>'korting_pct')::numeric, 0),
+                coalesce((l->>'is_extra')::boolean, false), coalesce(nullif(l->>'classificatie', ''), 'dienst'), nullif(l->>'opmerking', ''));
+      END LOOP;
+    ELSE
+      INSERT INTO invoice_lines (invoice_id, volgnr, omschrijving, artikel, aantal, eenheid, prijs_excl, btw_pct, korting_pct, is_extra, classificatie)
+      VALUES (v_inv, 1, r.omschrijving, left(coalesce(v_titel, r.omschrijving), 120), 1, 'forfait', v_excl, coalesce(r.btw_pct, 21), 0, false, 'dienst');
+    END IF;
+
+    INSERT INTO invoice_wijzigingen (invoice_id, actie, veld, oud, nieuw, actor_email)
+    VALUES (v_inv, 'bevestigd', 'voorstel', null, 'Aangemaakt uit het bevestigde factuurvoorstel van contract ' || p_contract_id::text || ' (voorstel ' || r.volgnr || '/' || r.aantal || ')', p_actor_email);
+
+    UPDATE contract_facturatie_opdrachten
+       SET invoice_id = v_inv, status = 'afgehandeld', bevestigd_op = now(), bevestigd_door = p_actor_email, updated_at = now()
+     WHERE id = r.id;
+    v_aangemaakt := v_aangemaakt + 1; v_ids := v_ids || v_inv;
+  END LOOP;
+
+  IF v_aangemaakt > 0 THEN
+    UPDATE contracts SET facturatie_bevestigd_op = now(), facturatie_gewijzigd_na_bevestiging = false WHERE id = p_contract_id;
+  END IF;
+  RETURN jsonb_build_object('aangemaakt', v_aangemaakt, 'overgeslagen', v_overgeslagen, 'invoice_ids', to_jsonb(v_ids));
+END $$;
+REVOKE ALL ON FUNCTION public.bevestig_factuurplanning(uuid, uuid, text, uuid[]) FROM public, anon, authenticated;
+
+-- ── Vereenvoudigde facturenmodule + archief los van contract (21 sep 2026) ────
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS verantwoordelijke text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS sent_by_email text;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS sent_at timestamptz;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS sent_by_email text;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS verantwoordelijke text;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS payment_term_days integer;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS contract_id uuid REFERENCES public.contracts(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS recurring_invoices_contract_idx ON public.recurring_invoices(contract_id);
+-- Het archief overleeft het verwijderen van een contract (geen FK, wel index).
+ALTER TABLE public.contract_archief DROP CONSTRAINT IF EXISTS contract_archief_contract_id_fkey;
+CREATE INDEX IF NOT EXISTS contract_archief_contract_idx ON public.contract_archief(contract_id);
+-- Uniek certificaatnummer per ondertekening.
+CREATE SEQUENCE IF NOT EXISTS public.contract_certificaat_seq;
+ALTER TABLE public.contract_archief ADD COLUMN IF NOT EXISTS certificaat_nr text;
+CREATE OR REPLACE FUNCTION public.volgend_certificaatnummer() RETURNS text LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  SELECT 'NGM-CERT-' || to_char(now() AT TIME ZONE 'Europe/Brussels', 'YYYY') || '-' || lpad(nextval('public.contract_certificaat_seq')::text, 5, '0');
+$$;
+REVOKE ALL ON FUNCTION public.volgend_certificaatnummer() FROM public, anon, authenticated;
+-- Metricool-feedbacklink per klant.
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS metricool_feedback_url text;
+
+-- ── Kanban-pipeline + salesactiviteiten (21 sep 2026) ────────────────────────
+-- Eén horizontaal bord met negen kolommen (lib/sales/stages.ts). Leadbron los
+-- van de fase; positie per kolom; opvolgdatum als datum (callback_at blijft het
+-- exacte terugbelmoment); dealwaarde/sluiting/verliesreden op de lead zelf.
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS leadbron          text NOT NULL DEFAULT 'outbound';
+-- positie bewust NULLABLE: een nieuwe kaart (NULL) staat bovenaan zijn kolom
+-- (ORDER BY positie NULLS FIRST, updated_at DESC); na een sleep nummert
+-- sales_herorden() de hele kolom.
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS positie           integer;
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS dienst            text;
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS opvolgdatum       date;
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS deal_waarde_cents bigint;
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS gesloten_op       timestamptz;
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS verlies_reden     text;
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS website_aanvraag  jsonb;
+CREATE INDEX IF NOT EXISTS sales_leads_kolom_positie ON public.sales_leads (sales_client_id, stage_key, positie);
+CREATE INDEX IF NOT EXISTS sales_leads_opvolgdatum   ON public.sales_leads (opvolgdatum) WHERE opvolgdatum IS NOT NULL;
+
+-- Vangnet: wie nog een OUDE fasesleutel schrijft (Harrie's databanktrigger
+-- harrie_verwerk_event, oude code), krijgt die stil vertaald naar de nieuwe
+-- kolom. Harrie-leads krijgen bij aanmaak leadbron 'harrie'.
+-- Naam begint met 'f' zodat hij vóór sales_leads_merken_sync draait
+-- (BEFORE-triggers lopen alfabetisch).
+CREATE OR REPLACE FUNCTION public.sales_leads_fase_normaliseren() RETURNS trigger
+LANGUAGE plpgsql AS $fn$
+BEGIN
+  NEW.stage_key := CASE NEW.stage_key
+    WHEN 'to_contact'         THEN 'outbound'
+    WHEN 'contacted_call'     THEN 'gebeld'
+    WHEN 'contacted_linkedin' THEN 'email_verstuurd'
+    WHEN 'contacted_mail'     THEN 'email_verstuurd'
+    WHEN 'email_after_call'   THEN 'opvolgen'
+    WHEN 'email_sent'         THEN 'email_verstuurd'
+    WHEN 'not_interested'     THEN 'verloren'
+    WHEN 'appointment'        THEN 'afspraak'
+    WHEN 'max_pogingen'       THEN 'opvolgen'
+    WHEN 'won'                THEN 'gewonnen'
+    WHEN 'lost'               THEN 'verloren'
+    ELSE NEW.stage_key END;
+  IF TG_OP = 'INSERT' AND NEW.source = 'harrie' AND NEW.leadbron = 'outbound' THEN
+    NEW.leadbron := 'harrie';
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+DROP TRIGGER IF EXISTS sales_leads_fase_normaliseren ON public.sales_leads;
+CREATE TRIGGER sales_leads_fase_normaliseren
+BEFORE INSERT OR UPDATE OF stage_key ON public.sales_leads
+FOR EACH ROW EXECUTE FUNCTION public.sales_leads_fase_normaliseren();
+
+-- Merk vastleggen vanaf de afspraak: nu op de nieuwe sleutels (de oude blijven
+-- erin staan voor het geval de vertaaltrigger hierboven nog niet bestaat).
+CREATE OR REPLACE FUNCTION public.sales_leads_merken_sync() RETURNS trigger
+LANGUAGE plpgsql AS $fn$
+DECLARE v_key text;
+BEGIN
+  IF NEW.stage_key IN ('afspraak', 'voorstel', 'gewonnen', 'verloren', 'appointment', 'won', 'lost')
+     AND coalesce(array_length(NEW.merken, 1), 0) = 0
+     AND NEW.pipeline_id IS NOT NULL THEN
+    SELECT key INTO v_key FROM public.sales_pipelines WHERE id = NEW.pipeline_id;
+    IF v_key IS NOT NULL THEN NEW.merken := ARRAY[v_key]; END IF;
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+
+-- Rang voor Harrie's "enkel vooruit"-rem, voor oude én nieuwe sleutels
+-- (spiegelt RANG in lib/sales/stages.ts).
+CREATE OR REPLACE FUNCTION public.harrie_stage_rang(fase text)
+RETURNS int LANGUAGE sql IMMUTABLE AS $fn$
+  SELECT CASE fase
+    WHEN 'outbound' THEN 10 WHEN 'inbound' THEN 10 WHEN 'to_contact' THEN 10
+    WHEN 'gebeld' THEN 20 WHEN 'email_verstuurd' THEN 20
+    WHEN 'contacted_call' THEN 20 WHEN 'contacted_linkedin' THEN 20 WHEN 'contacted_mail' THEN 20 WHEN 'email_sent' THEN 20
+    WHEN 'opvolgen' THEN 30 WHEN 'email_after_call' THEN 30 WHEN 'max_pogingen' THEN 30
+    WHEN 'afspraak' THEN 50 WHEN 'appointment' THEN 50
+    WHEN 'voorstel' THEN 60
+    WHEN 'verloren' THEN 90 WHEN 'not_interested' THEN 90 WHEN 'lost' THEN 90
+    WHEN 'gewonnen' THEN 99 WHEN 'won' THEN 99
+    ELSE 0 END;
+$fn$;
+
+-- Volgorde binnen één kolom in één statement (POST /api/admin/sales/leads/herorden).
+CREATE OR REPLACE FUNCTION public.sales_herorden(p_stage text, p_ids uuid[])
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $fn$
+  UPDATE public.sales_leads l
+     SET positie = x.ord - 1, stage_key = p_stage
+    FROM unnest(p_ids) WITH ORDINALITY AS x(id, ord)
+   WHERE l.id = x.id;
+$fn$;
+REVOKE ALL ON FUNCTION public.sales_herorden(text, uuid[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.sales_herorden(text, uuid[]) TO service_role;
+
+-- Bestaande leads naar de nieuwe kolommen (LEGACY_STAGE_MAP). Idempotent:
+-- enkel rijen die nog een oude sleutel dragen.
+UPDATE public.sales_leads SET stage_key = CASE stage_key
+  WHEN 'to_contact'         THEN 'outbound'
+  WHEN 'contacted_call'     THEN 'gebeld'
+  WHEN 'contacted_linkedin' THEN 'email_verstuurd'
+  WHEN 'contacted_mail'     THEN 'email_verstuurd'
+  WHEN 'email_after_call'   THEN 'opvolgen'
+  WHEN 'email_sent'         THEN 'email_verstuurd'
+  WHEN 'not_interested'     THEN 'verloren'
+  WHEN 'appointment'        THEN 'afspraak'
+  WHEN 'max_pogingen'       THEN 'opvolgen'
+  WHEN 'won'                THEN 'gewonnen'
+  WHEN 'lost'               THEN 'verloren'
+  ELSE stage_key END
+WHERE stage_key IN ('to_contact','contacted_call','contacted_linkedin','contacted_mail','email_after_call',
+                    'email_sent','not_interested','appointment','max_pogingen','won','lost');
+-- Geen verdere datawijzigingen: de oude verliesreden (lost_reason) en de
+-- Harrie-herkomst (label 'Harrie') leest de app zelf als terugval.
+ALTER TABLE public.sales_leads ALTER COLUMN stage_key SET DEFAULT 'outbound';
+
+-- Kolomlabels per organisatie (ensureStages() houdt dit ook bij).
+INSERT INTO public.sales_stages (sales_client_id, key, label, position, is_won, is_lost)
+SELECT c.id, v.key, v.label, v.pos, v.won, v.lost
+FROM public.sales_clients c
+CROSS JOIN (VALUES
+  ('outbound','Outbound leads',1,false,false),
+  ('inbound','Inbound leads',2,false,false),
+  ('gebeld','Gebeld',3,false,false),
+  ('email_verstuurd','E-mail verstuurd',4,false,false),
+  ('opvolgen','Opvolgen',5,false,false),
+  ('afspraak','Afspraak gepland',6,false,false),
+  ('voorstel','Voorstel verstuurd',7,false,false),
+  ('gewonnen','Gewonnen',8,true,false),
+  ('verloren','Verloren',9,false,true)
+) AS v(key,label,pos,won,lost)
+ON CONFLICT (sales_client_id, key) DO NOTHING;
+-- De oude fase-labels blijven staan (niets verwijderen); er verwijst na de
+-- vertaling hierboven gewoon geen lead meer naar.
+
+-- Salesactiviteiten: wat een medewerker deed op een lead. Hier draaien de
+-- statistieken op; de tijdlijn (sales_lead_events) krijgt van elke activiteit
+-- ook een regel. Zacht verwijderen via verwijderd_op.
+CREATE TABLE IF NOT EXISTS public.sales_activiteiten (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id          uuid NOT NULL REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  medewerker_id    uuid,
+  medewerker_email text,
+  type             text NOT NULL CHECK (type IN ('telefoongesprek','email_verstuurd','lead_afgehandeld','opvolging',
+                     'afspraak_gepland','voorstel_verstuurd','deal_gewonnen','deal_verloren','interne_notitie','fase_gewijzigd')),
+  duur_seconden    integer,
+  uitkomst         text,
+  notitie          text,
+  opvolgdatum      date,
+  naar_fase        text,
+  afspraak_id      uuid,
+  verwijderd_op    timestamptz,
+  created_at       timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sales_activiteiten_medewerker ON public.sales_activiteiten (medewerker_id, created_at);
+CREATE INDEX IF NOT EXISTS sales_activiteiten_lead       ON public.sales_activiteiten (lead_id, created_at);
+ALTER TABLE public.sales_activiteiten ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "sales_activiteiten admin all" ON public.sales_activiteiten;
+CREATE POLICY "sales_activiteiten admin all" ON public.sales_activiteiten FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+-- Back-up van de fase per lead vóór de kanbanmigratie (21 sep 2026), om terug te kunnen.
+CREATE TABLE IF NOT EXISTS public.sales_leads_fase_backup_20260921 AS SELECT id, stage_key, now() AS bewaard_op FROM public.sales_leads WHERE false;
+
+-- ── Formulieren (22 sep 2026) ───────────────────────────────────────────────
+-- Intake- en algemene formulieren die de klant via een link invult. Alles loopt
+-- server-side via de service-role (admin-routes + publieke /f/<token>-route);
+-- RLS staat aan zonder policies, en anon/authenticated krijgen geen rechten.
+CREATE TABLE IF NOT EXISTS public.formulieren (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  titel           text NOT NULL,
+  beschrijving    text,
+  dienst          text NOT NULL DEFAULT 'algemeen',
+  doel            text,
+  velden          jsonb NOT NULL DEFAULT '[]'::jsonb,
+  instellingen    jsonb NOT NULL DEFAULT '{}'::jsonb,
+  status          text NOT NULL DEFAULT 'concept' CHECK (status IN ('concept','actief','gesloten')),
+  created_by      uuid,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  gearchiveerd_op timestamptz
+);
+CREATE INDEX IF NOT EXISTS formulieren_status ON public.formulieren (status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.formulier_links (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  formulier_id   uuid NOT NULL REFERENCES public.formulieren(id) ON DELETE CASCADE,
+  client_id      uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  token          text NOT NULL UNIQUE CHECK (char_length(token) >= 32),
+  label          text,
+  verloopt_op    timestamptz,
+  ingetrokken_op timestamptz,
+  eenmalig       boolean NOT NULL DEFAULT false,
+  created_by     uuid,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS formulier_links_formulier ON public.formulier_links (formulier_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS formulier_links_client    ON public.formulier_links (client_id) WHERE client_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.formulier_inzendingen (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  formulier_id    uuid NOT NULL REFERENCES public.formulieren(id) ON DELETE CASCADE,
+  link_id         uuid REFERENCES public.formulier_links(id) ON DELETE SET NULL,
+  client_id       uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  antwoorden      jsonb NOT NULL DEFAULT '{}'::jsonb,
+  velden_snapshot jsonb,
+  naam            text,
+  email           text,
+  status          text NOT NULL DEFAULT 'nieuw' CHECK (status IN ('nieuw','gezien','verwerkt')),
+  admin_notitie   text,
+  ip              text,
+  user_agent      text,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS formulier_inzendingen_formulier ON public.formulier_inzendingen (formulier_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS formulier_inzendingen_link      ON public.formulier_inzendingen (link_id);
+CREATE INDEX IF NOT EXISTS formulier_inzendingen_client    ON public.formulier_inzendingen (client_id, created_at DESC) WHERE client_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS formulier_inzendingen_nieuw     ON public.formulier_inzendingen (formulier_id) WHERE status = 'nieuw';
+
+ALTER TABLE public.formulieren           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.formulier_links       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.formulier_inzendingen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.formulieren           FROM anon, authenticated;
+REVOKE ALL ON public.formulier_links       FROM anon, authenticated;
+REVOKE ALL ON public.formulier_inzendingen FROM anon, authenticated;
+
+-- Privébucket voor bestanden uit formulieren (logo's, voorbeelden, briefings).
+-- Uploads gebeuren met een door de server uitgegeven ondertekende uploadlink;
+-- downloaden enkel via tijdelijke ondertekende links in de admin. 20 MB/bestand.
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('formulier-bestanden', 'formulier-bestanden', false, 20971520)
+ON CONFLICT (id) DO NOTHING;
+
+-- ── Pipeline-opdrachten + beltijd (22 sep 2026) ─────────────────────────────
+-- De Opdrachten-pagina is opgegaan in de pipeline: een lead draagt één of meer
+-- opdrachten (titel + bedrag excl. btw); hun som is de waarde van de lead en
+-- telt per kolom op het bord op. Daarnaast: beltijd loggen per account.
+-- Alles additief en idempotent. De tabel `opdrachten` blijft integraal bestaan
+-- (archief); enkel opdrachten.lead_id wordt ingevuld voor de overgezette rijen.
+
+-- 1) Opdrachten op een lead
+CREATE TABLE IF NOT EXISTS public.sales_lead_opdrachten (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id          uuid NOT NULL REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  titel            text NOT NULL,
+  bedrag_cents     bigint NOT NULL DEFAULT 0 CHECK (bedrag_cents >= 0),
+  dienst           text,
+  notitie          text,
+  positie          integer,
+  created_by       uuid,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now(),
+  verwijderd_op    timestamptz,
+  -- Herkomst uit de oude tabel `opdrachten` (migratie hieronder); uniek zodat
+  -- een tweede run niets dubbel overzet.
+  bron_opdracht_id uuid UNIQUE REFERENCES public.opdrachten(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS sales_lead_opdrachten_lead
+  ON public.sales_lead_opdrachten (lead_id, positie) WHERE verwijderd_op IS NULL;
+ALTER TABLE public.sales_lead_opdrachten ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "sales_lead_opdrachten admin all" ON public.sales_lead_opdrachten;
+CREATE POLICY "sales_lead_opdrachten admin all" ON public.sales_lead_opdrachten FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+REVOKE ALL ON public.sales_lead_opdrachten FROM anon;
+DO $sales$ BEGIN
+  CREATE TRIGGER trg_sales_lead_opdrachten_updated BEFORE UPDATE ON public.sales_lead_opdrachten
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $sales$;
+
+-- 2) Beltijd: sessies per medewerker (start/stop of handmatig). Hoogstens één
+--    lopende sessie per medewerker.
+CREATE TABLE IF NOT EXISTS public.sales_beltijd (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  medewerker_id    uuid NOT NULL,
+  medewerker_email text,
+  start_op         timestamptz NOT NULL,
+  einde_op         timestamptz,
+  duur_seconden    integer CHECK (duur_seconden IS NULL OR duur_seconden >= 0),
+  notitie          text,
+  aangemaakt_door  uuid,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  verwijderd_op    timestamptz,
+  CONSTRAINT sales_beltijd_einde_na_start CHECK (einde_op IS NULL OR einde_op >= start_op)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS sales_beltijd_een_lopend
+  ON public.sales_beltijd (medewerker_id) WHERE einde_op IS NULL AND verwijderd_op IS NULL;
+CREATE INDEX IF NOT EXISTS sales_beltijd_medewerker_start ON public.sales_beltijd (medewerker_id, start_op);
+CREATE INDEX IF NOT EXISTS sales_beltijd_start ON public.sales_beltijd (start_op) WHERE verwijderd_op IS NULL;
+ALTER TABLE public.sales_beltijd ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "sales_beltijd admin all" ON public.sales_beltijd;
+CREATE POLICY "sales_beltijd admin all" ON public.sales_beltijd FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+REVOKE ALL ON public.sales_beltijd FROM anon;
+
+-- 3) Bestaande opdrachten overzetten naar leads (idempotent, veilig herhaalbaar).
+--    Per opdracht zonder lead_id (en nog niet overgezet):
+--      · bedrijf zoeken op dedupe-sleutel (zoals createLead: harrie_dedupe_key =
+--        companyDedupeKey), anders aanmaken — naam = klant, anders klant_vrij, anders titel;
+--      · heeft dat bedrijf al een ACTIEVE lead (één lead per bedrijf), dan komt de
+--        opdracht op die lead (fase/labels van die lead blijven ongemoeid);
+--        anders een nieuwe lead: fase volgens de oude status, leadbron 'manueel',
+--        label 'Opdracht', laatste notitie = omschrijving;
+--      · opdracht erop (bron_opdracht_id = opdrachten.id) + tijdlijnregel;
+--      · opdrachten.lead_id = die lead.
+--    De CASE spiegelt OUDE_STATUS_NAAR_FASE in lib/sales/opdrachten-model.ts.
+DO $migratie$
+DECLARE
+  o          record;
+  v_org      uuid;
+  v_pipeline uuid;
+  v_naam     text;
+  v_key      text;
+  v_company  uuid;
+  v_lead     uuid;
+  v_stage    text;
+  v_notitie  text;
+  v_bedrag   bigint;
+  v_nieuw    int := 0;
+  v_bestaand int := 0;
+BEGIN
+  -- Uitgeschakeld (2 nov 2026): de pipeline is opgegaan in Projecten. Kaarten
+  -- zonder lead zijn nu normaal; dit blok mag er geen leads meer voor maken.
+  RETURN;
+  IF to_regclass('public.opdrachten') IS NULL OR to_regclass('public.sales_lead_opdrachten') IS NULL THEN
+    RETURN;
+  END IF;
+
+  -- Onze organisatie, zoals getOrCreateSalesOrg(): niet gearchiveerd, bij
+  -- meerdere de rij met een gekoppelde agenda, anders de oudste.
+  SELECT c.id INTO v_org
+    FROM public.sales_clients c
+   WHERE c.status IS DISTINCT FROM 'archived'
+   ORDER BY (EXISTS (SELECT 1 FROM public.sales_calendar_connections k WHERE k.sales_client_id = c.id)) DESC,
+            c.created_at ASC
+   LIMIT 1;
+  IF v_org IS NULL THEN
+    RAISE NOTICE 'Opdrachten-migratie overgeslagen: geen sales-organisatie gevonden.';
+    RETURN;
+  END IF;
+  -- Herkomstlijst zoals defaultPipelineId(): de eerste op positie.
+  SELECT p.id INTO v_pipeline FROM public.sales_pipelines p
+   WHERE p.sales_client_id = v_org ORDER BY p.position ASC LIMIT 1;
+
+  FOR o IN
+    SELECT op.id, op.titel, op.omschrijving, op.status, op.klant_vrij, op.bedrag_excl,
+           op.created_at, op.updated_at, op.afgerond_op, op.status_gewijzigd_op,
+           cl.company_name
+      FROM public.opdrachten op
+      LEFT JOIN public.clients cl ON cl.id = op.client_id
+     WHERE op.lead_id IS NULL
+       AND NOT EXISTS (SELECT 1 FROM public.sales_lead_opdrachten x WHERE x.bron_opdracht_id = op.id)
+     ORDER BY op.created_at ASC, op.id ASC
+  LOOP
+    v_naam := coalesce(nullif(btrim(o.company_name), ''), nullif(btrim(o.klant_vrij), ''), btrim(o.titel));
+    v_key := public.harrie_dedupe_key(v_naam, NULL);
+    v_notitie := nullif(btrim(coalesce(o.omschrijving, '')), '');
+    v_bedrag := greatest(0, round(coalesce(o.bedrag_excl, 0) * 100))::bigint;
+
+    -- Bedrijf: bestaand (zelfde dedupe-sleutel) of nieuw.
+    v_company := NULL;
+    SELECT id INTO v_company FROM public.sales_companies
+     WHERE sales_client_id = v_org AND dedupe_key = v_key LIMIT 1;
+    IF v_company IS NULL THEN
+      INSERT INTO public.sales_companies (sales_client_id, name, dedupe_key)
+      VALUES (v_org, v_naam, v_key)
+      ON CONFLICT (sales_client_id, dedupe_key) DO NOTHING
+      RETURNING id INTO v_company;
+      IF v_company IS NULL THEN
+        SELECT id INTO v_company FROM public.sales_companies
+         WHERE sales_client_id = v_org AND dedupe_key = v_key LIMIT 1;
+      END IF;
+    END IF;
+
+    -- Fase uit de oude status.
+    v_stage := CASE o.status
+      WHEN 'open'                THEN 'inbound'
+      WHEN 'voorstel_gevraagd'   THEN 'opvolgen'
+      WHEN 'voorstel_bezig'      THEN 'opvolgen'
+      WHEN 'voorstel_klaar'      THEN 'opvolgen'
+      WHEN 'voorstel_voorgelegd' THEN 'voorstel'
+      WHEN 'interesse'           THEN 'voorstel'
+      WHEN 'contract_verstuurd'  THEN 'voorstel'
+      WHEN 'geen_interesse'      THEN 'verloren'
+      WHEN 'geannuleerd'         THEN 'verloren'
+      WHEN 'getekend'            THEN 'gewonnen'
+      WHEN 'bezig'               THEN 'gewonnen'
+      WHEN 'wacht'               THEN 'gewonnen'
+      WHEN 'opgeleverd'          THEN 'gewonnen'
+      WHEN 'te_factureren'       THEN 'gewonnen'
+      WHEN 'factuur_verstuurd'   THEN 'gewonnen'
+      WHEN 'betaald'             THEN 'gewonnen'
+      WHEN 'afgerond'            THEN 'gewonnen'
+      ELSE 'inbound' END;
+
+    -- Eén actieve lead per bedrijf: bestaat die al, dan komt de opdracht erop.
+    v_lead := NULL;
+    SELECT id INTO v_lead FROM public.sales_leads
+     WHERE sales_client_id = v_org AND company_id = v_company AND archived_at IS NULL
+     ORDER BY created_at ASC LIMIT 1;
+
+    IF v_lead IS NULL THEN
+      INSERT INTO public.sales_leads
+        (sales_client_id, pipeline_id, company_id, stage_key, source, labels, leadbron,
+         laatste_notitie, laatste_notitie_op, gesloten_op, created_at)
+      VALUES
+        (v_org, v_pipeline, v_company, v_stage, 'manual', ARRAY['Opdracht']::text[], 'manueel',
+         left(v_notitie, 300), CASE WHEN v_notitie IS NOT NULL THEN o.created_at END,
+         CASE WHEN v_stage IN ('gewonnen', 'verloren') THEN coalesce(o.afgerond_op, o.status_gewijzigd_op, o.updated_at, o.created_at) END,
+         o.created_at)
+      RETURNING id INTO v_lead;
+      INSERT INTO public.sales_lead_events (lead_id, kind, body, created_at)
+      VALUES (v_lead, 'system', 'Lead aangemaakt · Manueel (overgezet uit Opdrachten)', o.created_at);
+      v_nieuw := v_nieuw + 1;
+    ELSE
+      v_bestaand := v_bestaand + 1;
+    END IF;
+
+    INSERT INTO public.sales_lead_opdrachten (lead_id, titel, bedrag_cents, notitie, positie, created_at, bron_opdracht_id)
+    VALUES (v_lead, btrim(o.titel), v_bedrag, v_notitie,
+            (SELECT count(*) FROM public.sales_lead_opdrachten x WHERE x.lead_id = v_lead AND x.verwijderd_op IS NULL)::int,
+            o.created_at, o.id)
+    ON CONFLICT (bron_opdracht_id) DO NOTHING;
+    INSERT INTO public.sales_lead_events (lead_id, kind, body, created_at)
+    VALUES (v_lead, 'system',
+            'Opdracht toegevoegd: ' || btrim(o.titel) || ' — € ' || replace(to_char(v_bedrag / 100.0, 'FM999999990.00'), '.', ','),
+            o.created_at);
+
+    UPDATE public.opdrachten SET lead_id = v_lead WHERE id = o.id AND lead_id IS NULL;
+  END LOOP;
+
+  RAISE NOTICE 'Opdrachten-migratie: % nieuwe leads, % opdrachten op een bestaande lead.', v_nieuw, v_bestaand;
+END $migratie$;
+
+-- Controle na het draaien (verwacht: 0 open rijen; som ≈ de oude som van bedrag_excl):
+--   SELECT count(*) FILTER (WHERE lead_id IS NULL) AS nog_open, count(*) AS totaal FROM public.opdrachten;
+--   SELECT count(*), sum(bedrag_cents) / 100.0 AS euro FROM public.sales_lead_opdrachten WHERE bron_opdracht_id IS NOT NULL;
+
+-- ── Contracttypes + klantmappen (23 sep 2026) ────────────────────────────────
+-- Contracttypes worden data i.p.v. een vaste lijst in de code. De waarde zelf
+-- blijft in `contracts.contract_type` staan (tekst), zodat bestaande contracten
+-- ongemoeid blijven; deze tabel beheert enkel WELKE namen er in de keuzelijst
+-- staan. "Overige — <eigen omschrijving>" wordt bewust als één typewaarde
+-- bewaard; er komt géén extra kolom voor een toelichting.
+CREATE TABLE IF NOT EXISTS public.contract_types (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam       text NOT NULL,
+  actief     boolean NOT NULL DEFAULT true,
+  volgorde   integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by uuid
+);
+ALTER TABLE public.contract_types
+  ADD COLUMN IF NOT EXISTS naam       text,
+  ADD COLUMN IF NOT EXISTS actief     boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS volgorde   integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS created_by uuid;
+
+-- Eén rij per naam, hoofdletterongevoelig ("Overige" en "overige" zijn hetzelfde).
+CREATE UNIQUE INDEX IF NOT EXISTS contract_types_naam_uniek ON public.contract_types (lower(btrim(naam)));
+CREATE INDEX IF NOT EXISTS contract_types_actief_idx ON public.contract_types (actief, volgorde);
+
+ALTER TABLE public.contract_types ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "contract types admin all" ON public.contract_types;
+CREATE POLICY "contract types admin all" ON public.contract_types
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+REVOKE ALL ON public.contract_types FROM anon;
+
+-- 1. Contracten zonder type krijgen de zichtbare terugval 'Niet toegewezen'.
+UPDATE public.contracts
+   SET contract_type = 'Niet toegewezen'
+ WHERE contract_type IS NULL OR btrim(contract_type) = '';
+
+-- 2. Startlijst: de historische lijst uit de code + de door NextGenMedia
+--    gevraagde types. Bijna-dubbels zijn samengevoegd op de schrijfwijze die
+--    al op contracten staat ('Overig' → 'Overige', 'Geheimhouding/NDA' →
+--    'NDA / geheimhouding', 'Freelancer' → 'Freelancecontract',
+--    'Samenwerking' → 'Samenwerkingsovereenkomst'). 'Niet toegewezen' staat
+--    achteraan. Idempotent: bestaande rijen blijven ongewijzigd.
+INSERT INTO public.contract_types (naam, actief, volgorde)
+SELECT v.naam, true, v.volgorde
+  FROM (VALUES
+    ('Klantcontract', 10),
+    ('Websitecontract', 20),
+    ('Social Media contract', 30),
+    ('Brandingcontract', 40),
+    ('Foto/videografiecontract', 50),
+    ('Partnercontract', 60),
+    ('Onderaannemerscontract', 70),
+    ('Freelancecontract', 80),
+    ('Samenwerkingsovereenkomst', 90),
+    ('NDA / geheimhouding', 100),
+    ('Overige', 110),
+    ('Dienstverlening', 120),
+    ('Socialmediamanagement', 130),
+    ('Marketing', 140),
+    ('Software of ontwikkeling', 150),
+    ('Onderhoud', 160),
+    ('Verhuur', 170),
+    ('Algemene voorwaarden', 180),
+    ('Niet toegewezen', 999)
+  ) AS v(naam, volgorde)
+ WHERE NOT EXISTS (
+   SELECT 1 FROM public.contract_types t WHERE lower(btrim(t.naam)) = lower(btrim(v.naam))
+ );
+
+-- 3. Types die al op een contract staan maar nog geen rij hebben, gaan mee —
+--    zo verliest geen enkel bestaand contract zijn type uit de keuzelijst.
+--    Een "Overige — <omschrijving>" is een eenmalige waarde en hoort niet in
+--    de beheerde lijst; die wordt hier overgeslagen.
+INSERT INTO public.contract_types (naam, actief, volgorde)
+SELECT DISTINCT ON (lower(btrim(c.contract_type))) btrim(c.contract_type), true, 500
+  FROM public.contracts c
+ WHERE c.contract_type IS NOT NULL
+   AND btrim(c.contract_type) <> ''
+   AND btrim(c.contract_type) NOT LIKE '%' || chr(8212) || '%'   -- geen "Overige — ..."
+   AND NOT EXISTS (
+     SELECT 1 FROM public.contract_types t WHERE lower(btrim(t.naam)) = lower(btrim(c.contract_type))
+   )
+ ORDER BY lower(btrim(c.contract_type)), c.created_at;
+
+-- Controle na het draaien:
+--   SELECT naam, actief, volgorde FROM public.contract_types ORDER BY volgorde, naam;
+--   SELECT contract_type, count(*) FROM public.contracts GROUP BY 1 ORDER BY 2 DESC;
+--   SELECT count(*) FROM public.contracts WHERE contract_type IS NULL OR btrim(contract_type) = '';  -- verwacht 0
+
+
+-- ── Eenmalige archiefverzending van alle contracten (23 sep 2026) ────────────
+-- Eenmalige archiefverzending van alle contracten naar één adres.
+-- Houdt per contract + ontvanger bij of de mail écht vertrokken is, zodat er
+-- nooit een dubbele mail kan vertrekken en een mislukte verzending apart
+-- opnieuw geprobeerd kan worden.
+create table if not exists contract_legal_verzending (
+  id uuid primary key default gen_random_uuid(),
+  contract_id uuid not null references contracts(id) on delete cascade,
+  ontvanger text not null,
+  onderwerp text,
+  status text not null default 'verstuurd',
+  certificaat boolean not null default false,
+  fout text,
+  message_id text,
+  pogingen integer not null default 1,
+  door text,
+  verstuurd_op timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+do $$
+begin
+  if not exists (select 1 from pg_indexes where indexname = 'contract_legal_verzending_uniek') then
+    create unique index contract_legal_verzending_uniek on contract_legal_verzending (contract_id, ontvanger);
+  end if;
+  if not exists (select 1 from pg_indexes where indexname = 'contract_legal_verzending_status_idx') then
+    create index contract_legal_verzending_status_idx on contract_legal_verzending (status);
+  end if;
+end $$;
+
+alter table contract_legal_verzending enable row level security;
+
+do $$
+begin
+  if not exists (select 1 from pg_policies where tablename = 'contract_legal_verzending' and policyname = 'legal_verzending_service_role') then
+    create policy legal_verzending_service_role on contract_legal_verzending for all to service_role using (true) with check (true);
+  end if;
+end $$;
+
+
+-- ── Looptijdstatus van contracten (23 sep 2026) ─────────────────────────────
+-- Los van de ondertekeningsstatus (contracts.status). Bestaande contracten
+-- krijgen via de default 'lopend'. Elke wijziging komt in contract_events
+-- (event_type 'looptijd_gewijzigd', meta {oud, nieuw, stop_datum, stop_reden}).
+alter table contracts add column if not exists looptijd_status text not null default 'lopend';
+alter table contracts add column if not exists stop_datum date;
+alter table contracts add column if not exists stop_reden text;
+alter table contracts add column if not exists looptijd_gewijzigd_op timestamptz;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'contracts_looptijd_status_check') then
+    alter table contracts add constraint contracts_looptijd_status_check
+      check (looptijd_status in ('lopend','afgerond','stopgezet','verlopen'));
+  end if;
+  if not exists (select 1 from pg_indexes where indexname = 'contracts_looptijd_status_idx') then
+    create index contracts_looptijd_status_idx on contracts (looptijd_status);
+  end if;
+end $$;
+
+
+-- ── Betaald markeren vanuit de facturenlijst (23 sep 2026) ──────────────────
+-- Een maand van een terugkerende facturatie kan nu ook "betaald" zijn. De
+-- status blijft 'verstuurd'; betaald_op (datum) + betaald_door bepalen de
+-- betaalde toestand, net als betaalstatus/betaald_op bij een gewone factuur.
+alter table recurring_invoice_months add column if not exists betaald_op date;
+alter table recurring_invoice_months add column if not exists betaald_door text;
+
+
+-- ── Personeel: dossiers, planning, inklokken, kosten (23 sep 2026) ──────────
+-- Volledig additief. Toegang loopt via de service-role in de API's
+-- (/api/admin/personeel voor beheer, /api/team voor de medewerker zelf);
+-- RLS staat aan zonder policies voor anon/authenticated = dicht als tweede laag.
+
+create table if not exists personeel (
+  id uuid primary key default gen_random_uuid(),
+  voornaam text not null,
+  achternaam text,
+  email text,
+  telefoon text,
+  type text not null default 'werknemer',
+  functie text,
+  afdeling text,
+  contracttype text,
+  startdatum date,
+  einddatum date,
+  actief boolean not null default true,
+  verantwoordelijke text,
+  standaard_werkdagen int[] not null default '{}',
+  max_uren_dag numeric,
+  max_uren_week numeric,
+  max_uren_maand numeric,
+  interne_notities text,
+  profielfoto_pad text,
+  auth_user_id uuid unique,
+  account_status text not null default 'geen',
+  uitnodiging_verzonden_at timestamptz,
+  created_by text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'personeel_type_check') then
+    alter table personeel add constraint personeel_type_check check (type in ('werknemer','student','freelancer','onderaannemer','andere'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'personeel_account_check') then
+    alter table personeel add constraint personeel_account_check check (account_status in ('geen','uitgenodigd','actief','geblokkeerd'));
+  end if;
+end $$;
+
+-- Gevoelige persoonsgegevens apart: enkel bevoegde admins lezen deze tabel.
+-- Rijksregisternummer en IBAN worden versleuteld opgeslagen (lib/crypto.ts).
+create table if not exists personeel_gevoelig (
+  personeel_id uuid primary key references personeel(id) on delete cascade,
+  adres text,
+  geboortedatum date,
+  rijksregisternummer_enc text,
+  noodcontact text,
+  iban_enc text,
+  updated_by text,
+  updated_at timestamptz not null default now()
+);
+
+-- Tariefversies: nooit herschreven, enkel afgesloten (geldig_tot).
+create table if not exists personeel_tarieven (
+  id uuid primary key default gen_random_uuid(),
+  personeel_id uuid not null references personeel(id) on delete cascade,
+  geldig_vanaf date not null,
+  geldig_tot date,
+  basis_label text not null default 'Brutouurloon',
+  basis_uur numeric not null default 0,
+  lijnen jsonb not null default '[]',
+  btw_pct numeric not null default 0,
+  uren_per_dag numeric not null default 8,
+  uren_per_maand numeric not null default 160,
+  opmerking text,
+  created_by text,
+  created_at timestamptz not null default now()
+);
+create index if not exists personeel_tarieven_pid on personeel_tarieven (personeel_id, geldig_vanaf);
+
+create table if not exists personeel_documenten (
+  id uuid primary key default gen_random_uuid(),
+  personeel_id uuid not null references personeel(id) on delete cascade,
+  map text not null default 'overig',
+  naam text not null,
+  pad text not null,
+  mime text,
+  grootte bigint,
+  vervalt_op date,
+  verplicht boolean not null default false,
+  toegevoegd_door text,
+  gewijzigd_door text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists personeel_documenten_pid on personeel_documenten (personeel_id);
+
+create table if not exists personeel_planning (
+  id uuid primary key default gen_random_uuid(),
+  personeel_id uuid not null references personeel(id) on delete cascade,
+  datum date not null,
+  start_tijd time not null,
+  eind_tijd time not null,
+  beschikbaarheid_id uuid,
+  client_id uuid,
+  opdracht_id uuid,
+  project text,
+  taak text,
+  verwachte_duur_min int,
+  deadline date,
+  prioriteit text default 'normaal',
+  briefing text,
+  links jsonb not null default '[]',
+  deliverables text,
+  locatie text,
+  thuiswerk boolean not null default false,
+  status text not null default 'gepland',
+  werkstatus text not null default 'nog_te_starten',
+  voortgang text,
+  created_by text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists personeel_planning_pid_datum on personeel_planning (personeel_id, datum);
+create index if not exists personeel_planning_datum on personeel_planning (datum);
+
+create table if not exists personeel_beschikbaarheid (
+  id uuid primary key default gen_random_uuid(),
+  personeel_id uuid not null references personeel(id) on delete cascade,
+  datum date not null,
+  start_tijd time not null,
+  eind_tijd time not null,
+  opmerking text,
+  status text not null default 'ingediend',
+  goedgekeurd_start time,
+  goedgekeurd_eind time,
+  voorstel_start time,
+  voorstel_eind time,
+  reactie text,
+  planning_id uuid,
+  beslist_door text,
+  beslist_op timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists personeel_beschikbaarheid_pid_datum on personeel_beschikbaarheid (personeel_id, datum);
+
+create table if not exists personeel_sessies (
+  id uuid primary key default gen_random_uuid(),
+  personeel_id uuid not null references personeel(id) on delete cascade,
+  start_at timestamptz not null,
+  eind_at timestamptz,
+  pauzes jsonb not null default '[]',
+  pauze_actief_sinds timestamptz,
+  status text not null default 'actief',
+  client_id uuid,
+  opdracht_id uuid,
+  project text,
+  taak text,
+  planning_id uuid,
+  verslag jsonb not null default '{}',
+  links jsonb not null default '[]',
+  admin_opmerking text,
+  correctie_vraag text,
+  beoordeeld_door text,
+  beoordeeld_op timestamptz,
+  tarief_id uuid,
+  kost_per_uur numeric,
+  kost_bedrag numeric,
+  kost_snapshot jsonb,
+  bron text not null default 'inklok',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists personeel_sessies_pid_start on personeel_sessies (personeel_id, start_at);
+create index if not exists personeel_sessies_status on personeel_sessies (status);
+-- Nooit twee actieve sessies tegelijk voor dezelfde medewerker.
+create unique index if not exists personeel_sessies_een_actief on personeel_sessies (personeel_id) where status = 'actief';
+
+-- Definitieve kostenposten per medewerker en maand, met versies (correcties traceerbaar).
+create table if not exists personeel_kostenposten (
+  id uuid primary key default gen_random_uuid(),
+  personeel_id uuid not null references personeel(id) on delete cascade,
+  periode text not null,
+  soort text not null default 'definitief',
+  bedrag numeric not null default 0,
+  uren numeric not null default 0,
+  berekening jsonb not null default '{}',
+  sessie_ids uuid[] not null default '{}',
+  versie int not null default 1,
+  actueel boolean not null default true,
+  vervangen_door uuid,
+  vorige_id uuid,
+  verschil numeric,
+  cost_entry_id uuid,
+  reden text,
+  created_by text,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists personeel_kostenposten_actueel on personeel_kostenposten (personeel_id, periode, soort) where actueel;
+
+-- Volledige auditlog: oude en nieuwe waarden, reden, wie en wanneer.
+create table if not exists personeel_audit (
+  id bigserial primary key,
+  personeel_id uuid,
+  entiteit text not null,
+  entiteit_id text,
+  actie text not null,
+  oud jsonb,
+  nieuw jsonb,
+  reden text,
+  actor_email text,
+  actor_id uuid,
+  created_at timestamptz not null default now()
+);
+create index if not exists personeel_audit_pid on personeel_audit (personeel_id, created_at desc);
+
+-- In-app meldingen (personeel_id null = voor de admins).
+create table if not exists personeel_meldingen (
+  id uuid primary key default gen_random_uuid(),
+  personeel_id uuid references personeel(id) on delete cascade,
+  event text not null,
+  titel text not null,
+  tekst text,
+  link text,
+  sleutel text,
+  gelezen_op timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists personeel_meldingen_pid on personeel_meldingen (personeel_id, created_at desc);
+create unique index if not exists personeel_meldingen_sleutel on personeel_meldingen (sleutel) where sleutel is not null;
+
+alter table personeel enable row level security;
+alter table personeel_gevoelig enable row level security;
+alter table personeel_tarieven enable row level security;
+alter table personeel_documenten enable row level security;
+alter table personeel_planning enable row level security;
+alter table personeel_beschikbaarheid enable row level security;
+alter table personeel_sessies enable row level security;
+alter table personeel_kostenposten enable row level security;
+alter table personeel_audit enable row level security;
+alter table personeel_meldingen enable row level security;
+
+-- Koppeling met Financiën: een geboekte personeelskost is herkenbaar en uniek.
+alter table cost_entries add column if not exists bron text;
+alter table cost_entries add column if not exists bron_sleutel text;
+do $$ begin
+  if not exists (select 1 from pg_indexes where indexname = 'cost_entries_bron_sleutel') then
+    create unique index cost_entries_bron_sleutel on cost_entries (bron_sleutel) where bron_sleutel is not null;
+  end if;
+end $$;
+
+-- Privé-opslag voor profielfoto's en personeelsdocumenten.
+insert into storage.buckets (id, name, public) values ('personeel', 'personeel', false) on conflict (id) do nothing;
+
+-- Alida: enkel naam, type en status — alle andere gegevens vult een admin later in.
+insert into personeel (voornaam, type, actief, created_by)
+select 'Alida', 'student', true, 'systeem'
+where not exists (select 1 from personeel where lower(voornaam) = 'alida');
+
+-- ── Outbound-leads: kwaliteitscontrole en opschoning ─────────────────────────
+-- Per lead het laatste controleresultaat (telefoon, website, bewijs op de site).
+CREATE TABLE IF NOT EXISTS public.sales_lead_controle (
+  lead_id          uuid PRIMARY KEY REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  status           text NOT NULL,        -- geverifieerd | vertrouwd | niet_gecontroleerd | geen_telefoon | ongeldig_telefoon | dubbel | geen_website | website_ongeldig | website_onbereikbaar | niet_verifieerbaar
+  reden            text,
+  telefoon_norm    text,
+  website_norm     text,
+  site_bereikbaar  boolean,
+  telefoon_op_site boolean,
+  naam_op_site     boolean,
+  bron             text,
+  gecontroleerd_op timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sales_lead_controle_status ON public.sales_lead_controle (status);
+ALTER TABLE public.sales_lead_controle ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "sales_lead_controle admin all" ON public.sales_lead_controle;
+CREATE POLICY "sales_lead_controle admin all" ON public.sales_lead_controle FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- Back-up van elke rij die een opschoning aanraakt (oude waarden), om te kunnen herstellen.
+CREATE TABLE IF NOT EXISTS public.sales_opschoning_backup (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run        text NOT NULL,
+  tabel      text NOT NULL,
+  rij_id     uuid NOT NULL,
+  oud        jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sales_opschoning_backup_run ON public.sales_opschoning_backup (run, tabel);
+ALTER TABLE public.sales_opschoning_backup ENABLE ROW LEVEL SECURITY;
+
+-- ── Personeel: bevestiging van werkblokken + ClickUp-taak ───────────────────
+-- bevestiging: te_bevestigen | bevestigd | geweigerd; NULL = werkblok van vóór deze
+-- flow (geldt als bevestigd). Na bevestiging komt er een ClickUp-taak.
+alter table personeel_planning add column if not exists bevestiging text;
+alter table personeel_planning add column if not exists bevestigd_op timestamptz;
+alter table personeel_planning add column if not exists bevestiging_reden text;
+alter table personeel_planning add column if not exists clickup_task_id text;
+alter table personeel_planning add column if not exists clickup_status text;   -- toegewezen | zonder_toegewezene | fout | geannuleerd
+alter table personeel_planning add column if not exists clickup_toegewezen text;
+alter table personeel_planning add column if not exists clickup_fout text;
+
+-- ── Wie maakte het aan? (per admin-account zichtbaar) ────────────────────────
+alter table clients add column if not exists created_by uuid;
+alter table framer_sites add column if not exists created_by uuid;
+
+-- ── Pipeline: verwachte omzet per lead (indicatief, handmatig) ───────────────
+-- Staat los van opdrachten, contracten en facturen; leeg = telt niet mee.
+alter table sales_leads add column if not exists verwachte_omzet_cents bigint;
+
+-- ── Salesstatistieken: betrouwbare registratie ───────────────────────────────
+-- Gesprekken: bron (focus|pipeline) en gemeten start/einde (duur enkel daaruit).
+alter table sales_activiteiten add column if not exists bron text;
+alter table sales_activiteiten add column if not exists van_fase text;
+alter table sales_activiteiten add column if not exists gesprek_start timestamptz;
+alter table sales_activiteiten add column if not exists gesprek_eind timestamptz;
+-- Afspraken: wie was verantwoordelijk (closer, los van wie boekte) en is ze gehouden?
+alter table sales_appointments add column if not exists verantwoordelijke_id uuid;
+alter table sales_appointments add column if not exists aanwezigheid text;       -- gehouden | niet_gehouden | NULL = nog niet bevestigd
+alter table sales_appointments add column if not exists aanwezigheid_op timestamptz;
+alter table sales_appointments add column if not exists aanwezigheid_door uuid;
+-- Correcties op registraties: oude en nieuwe waarde, reden, wie en wanneer.
+create table if not exists sales_stat_correcties (
+  id uuid primary key default gen_random_uuid(),
+  soort text not null,
+  entiteit text not null,
+  entiteit_id uuid not null,
+  lead_id uuid,
+  oud jsonb,
+  nieuw jsonb,
+  reden text not null,
+  door uuid,
+  door_email text,
+  created_at timestamptz not null default now()
+);
+create index if not exists sales_stat_correcties_entiteit on sales_stat_correcties (entiteit, entiteit_id);
+alter table sales_stat_correcties enable row level security;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Tweestapsverificatie met een authenticator-app (TOTP) + 2FA-sessies (27 sep 2026)
+-- Bouwt verder op de bestaande tweede stap (login_codes / login_settings).
+--
+--  · user_totp          het TOTP-geheim per gebruiker, VERSLEUTELD (AES-256-GCM met
+--                       TOTP_ENC_KEY uit de omgeving — de sleutel staat nooit hier).
+--  · user_herstelcodes  herstelcodes, enkel als HMAC-hash, elk één keer bruikbaar.
+--  · twofa_sessies      welke Supabase-sessie (session_id uit de JWT) de tweede stap
+--                       doorliep. Enige bron voor middleware, route-guards én RLS.
+--  · sessie_2fa_ok()    voor RLS: heeft de huidige sessie de tweede stap gedaan?
+--  · user_roles         restrictieve policy: de admin-rol is via de gebruikerssessie
+--                       pas zichtbaar na de tweede stap. Alle admin-policies (die
+--                       user_roles opvragen) vallen daardoor mee dicht.
+-- Enkel de service-role leest/schrijft deze tabellen (RLS aan, geen policies).
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS public.user_totp (
+  user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  secret_enc text,
+  actief boolean NOT NULL DEFAULT false,
+  geactiveerd_op timestamptz,
+  laatste_stap bigint,
+  setup_secret_enc text,
+  setup_gestart_op timestamptz,
+  gewijzigd_op timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.user_totp ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.user_totp FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.user_herstelcodes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  code_hash text NOT NULL,
+  gebruikt_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS user_herstelcodes_user_idx ON public.user_herstelcodes (user_id) WHERE gebruikt_op IS NULL;
+ALTER TABLE public.user_herstelcodes ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.user_herstelcodes FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.twofa_sessies (
+  session_id uuid PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  methode text NOT NULL,
+  totp_instellen boolean NOT NULL DEFAULT false,
+  geverifieerd_op timestamptz NOT NULL DEFAULT now(),
+  verloopt_op timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS twofa_sessies_user_idx ON public.twofa_sessies (user_id);
+ALTER TABLE public.twofa_sessies ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.twofa_sessies FROM anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.sessie_2fa_ok() RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.twofa_sessies s
+     WHERE s.user_id = auth.uid()
+       AND s.session_id = NULLIF(auth.jwt() ->> 'session_id', '')::uuid
+       AND s.verloopt_op > now()
+  ) OR EXISTS (
+    SELECT 1 FROM public.login_settings l
+     WHERE l.auth_user_id = auth.uid() AND l.two_factor_required = false
+       AND NOT EXISTS (SELECT 1 FROM public.user_totp t WHERE t.user_id = auth.uid() AND t.actief)
+  )
+$$;
+REVOKE ALL ON FUNCTION public.sessie_2fa_ok() FROM public, anon;
+GRANT EXECUTE ON FUNCTION public.sessie_2fa_ok() TO authenticated;
+
+DROP POLICY IF EXISTS user_roles_admin_na_tweede_stap ON public.user_roles;
+CREATE POLICY user_roles_admin_na_tweede_stap ON public.user_roles
+  AS RESTRICTIVE FOR SELECT
+  USING (role <> 'admin' OR (SELECT public.sessie_2fa_ok()));
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2FA enkel nog met een authenticator-app (27 sep 2026)
+--  · login_settings.vrijgesteld_tot: een admin kan de 2FA van iemand TIJDELIJK
+--    uitschakelen (24 u / 7 d) of tot hij weer aangezet wordt (NULL).
+--  · Een geldige vrijstelling geldt nu ook als die persoon een app heeft (de
+--    admin bevestigt dat met eigen wachtwoord + app-code).
+-- ═══════════════════════════════════════════════════════════════════════════
+ALTER TABLE public.login_settings ADD COLUMN IF NOT EXISTS vrijgesteld_tot timestamptz;
+
+CREATE OR REPLACE FUNCTION public.sessie_2fa_ok() RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.twofa_sessies s
+     WHERE s.user_id = auth.uid()
+       AND s.session_id = NULLIF(auth.jwt() ->> 'session_id', '')::uuid
+       AND s.verloopt_op > now()
+  ) OR EXISTS (
+    SELECT 1 FROM public.login_settings l
+     WHERE l.auth_user_id = auth.uid() AND l.two_factor_required = false
+       AND (l.vrijgesteld_tot IS NULL OR l.vrijgesteld_tot > now())
+  )
+$$;
+REVOKE ALL ON FUNCTION public.sessie_2fa_ok() FROM public, anon;
+GRANT EXECUTE ON FUNCTION public.sessie_2fa_ok() TO authenticated;
+-- Wie startte een lopende app-koppeling? (een admin die voor iemand koppelt)
+ALTER TABLE public.user_totp ADD COLUMN IF NOT EXISTS setup_door uuid;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Verkoopverantwoordelijken (30 sep 2026) — namen uit Instellingen → Verkoop
+--  · clients.sales_verantwoordelijke  "klant van": wie de klant closet / wiens klant het is
+--  · clients.appointment_setter       wie de appointment zette (voor de vesting: 50/50)
+--  · opdrachten.verantwoordelijke     wie de opdracht in handen heeft / closet
+-- Tekst (geen login nodig): ook een toekomstige salescollega kan gekozen worden.
+-- ═══════════════════════════════════════════════════════════════════════════
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS sales_verantwoordelijke text;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS appointment_setter text;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS verantwoordelijke text;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Planning jobstudenten: algemene kalender (30 sep 2026)
+--  · personeel.kleur                         kleur per persoon in de algemene kalender
+--  · personeel_planning.groep_id             één inboeking voor meerdere mensen (zelfde shoot)
+--  · personeel_planning.clickup_bestaande_taak  optioneel: een bestaande ClickUp-taak om aan
+--                                            toe te wijzen i.p.v. een nieuwe te maken
+-- Beschikbaarheid is voortaan gewoon "beschikbaar" (geen goedkeuring meer nodig).
+-- ═══════════════════════════════════════════════════════════════════════════
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS kleur text;
+ALTER TABLE public.personeel_planning ADD COLUMN IF NOT EXISTS groep_id uuid;
+ALTER TABLE public.personeel_planning ADD COLUMN IF NOT EXISTS clickup_bestaande_taak text;
+CREATE INDEX IF NOT EXISTS personeel_planning_groep_idx ON public.personeel_planning (groep_id) WHERE groep_id IS NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Goedkeuringsdeadlines contentkalender (1 okt 2026)
+-- Per klant: één of meerdere maanden (YYYY-MM) die tegen een datum goedgekeurd
+-- moeten zijn. Na die dag wordt wat nog "bij klant" staat (ready_for_review)
+-- automatisch goedgekeurd; feedback en concepten blijven ongemoeid.
+-- Herinneringsmails gaan enkel manueel (MailComposer, kind 'goedkeuring').
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS public.content_goedkeuring_deadlines (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  maanden text[] NOT NULL,
+  deadline date NOT NULL,
+  status text NOT NULL DEFAULT 'open',   -- open | afgerond (verstreken, automatisch verwerkt)
+  notitie text,
+  auto_goedgekeurd int NOT NULL DEFAULT 0,
+  afgerond_op timestamptz,
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS content_goedkeuring_deadlines_klant_idx ON public.content_goedkeuring_deadlines (client_id, deadline);
+CREATE INDEX IF NOT EXISTS content_goedkeuring_deadlines_open_idx ON public.content_goedkeuring_deadlines (deadline) WHERE status = 'open';
+ALTER TABLE public.content_goedkeuring_deadlines ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.content_goedkeuring_deadlines FROM anon, authenticated;
+
+-- ── Vesting: facturen (termijnen) per vestingcontract (6 okt 2026) ─────────────
+-- Eén rij = één factuur van het contract. in_contract = hoort bij de getekende
+-- contractwaarde; invoice_id = gekoppelde factuur uit Facturen (status volgt die).
+CREATE TABLE IF NOT EXISTS public.vesting_contract_termijnen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.vesting_contracten(id) ON DELETE CASCADE,
+  volgnr integer NOT NULL,
+  periode text NOT NULL,
+  factuurdatum date NOT NULL,
+  bedrag_excl numeric NOT NULL DEFAULT 0,
+  btw_pct numeric NOT NULL DEFAULT 21,
+  status text NOT NULL DEFAULT 'gepland',
+  betaald_op date,
+  invoice_id uuid REFERENCES public.invoices(id) ON DELETE SET NULL,
+  in_contract boolean NOT NULL DEFAULT true,
+  notitie text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'vesting_contract_termijnen_volgnr_uniek') THEN
+    ALTER TABLE public.vesting_contract_termijnen ADD CONSTRAINT vesting_contract_termijnen_volgnr_uniek UNIQUE (contract_id, volgnr);
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS vesting_contract_termijnen_contract_idx ON public.vesting_contract_termijnen (contract_id);
+ALTER TABLE public.vesting_contract_termijnen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.vesting_contract_termijnen FROM anon, authenticated;
+
+-- ── Facturen als interne facturatieplanner (7 okt 2026) ────────────────────────
+-- Type, mededeling op de factuur, extern factuurnummer (Bram registreert het
+-- achteraf), klantreferentie/PO, prestatieperiode, korting in euro per regel,
+-- facturatiegegevens op de klant, herbruikbare artikelen en bijlagen.
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS factuur_type text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS mededeling text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS extern_factuurnummer text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS klant_referentie text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS prestatie_van date;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS prestatie_tot date;
+ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS korting_eur numeric NOT NULL DEFAULT 0;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS extern_factuurnummer text;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS adres_straat text;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS adres_postcode text;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS adres_gemeente text;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS adres_land text;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS facturatie_email text;
+
+-- Bestaande `reference`: de echte factuurnummers (2026-50 …) worden het externe
+-- factuurnummer, iets anders (bv. "Bestelbon nr: …") de klantreferentie.
+-- `reference` zelf blijft ongewijzigd staan.
+UPDATE public.invoices SET extern_factuurnummer = reference
+  WHERE extern_factuurnummer IS NULL AND reference ~ '^\d{4}-\d+$';
+UPDATE public.invoices SET klant_referentie = reference
+  WHERE klant_referentie IS NULL AND reference IS NOT NULL AND reference !~ '^\d{4}-\d+$';
+
+CREATE TABLE IF NOT EXISTS public.factuur_artikelen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam text NOT NULL,
+  beschrijving text,
+  eenheid text NOT NULL DEFAULT 'stuk',
+  prijs_excl numeric,
+  btw_pct numeric NOT NULL DEFAULT 21,
+  soort text NOT NULL DEFAULT 'dienst',
+  volgorde integer NOT NULL DEFAULT 0,
+  actief boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.factuur_artikelen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.factuur_artikelen FROM anon, authenticated;
+-- Startset zonder prijzen: de afgesproken prijs vult het team zelf in.
+INSERT INTO public.factuur_artikelen (naam, eenheid, soort, volgorde)
+SELECT v.naam, v.eenheid, v.soort, v.volgorde FROM (VALUES
+  ('Shoot', 'stuk', 'dienst', 1), ('Montage', 'uur', 'dienst', 2), ('Extra werkuren', 'uur', 'dienst', 3),
+  ('Kilometervergoeding', 'km', 'doorgerekende_kost', 4), ('Parking', 'stuk', 'doorgerekende_kost', 5),
+  ('Materiaalhuur', 'dag', 'doorgerekende_kost', 6)
+) AS v(naam, eenheid, soort, volgorde)
+WHERE NOT EXISTS (SELECT 1 FROM public.factuur_artikelen);
+
+CREATE TABLE IF NOT EXISTS public.invoice_bijlagen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_id uuid NOT NULL REFERENCES public.invoices(id) ON DELETE CASCADE,
+  naam text NOT NULL,
+  pad text NOT NULL,
+  grootte integer,
+  mime text,
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS invoice_bijlagen_invoice_idx ON public.invoice_bijlagen (invoice_id);
+ALTER TABLE public.invoice_bijlagen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.invoice_bijlagen FROM anon, authenticated;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS telefoon text;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS mededeling text;
+
+-- ── Contentplanning (8 okt 2026) ────────────────────────────────────────────────
+-- Uitbreiding van de Maandplanning tot één werkruimte voor de contentworkflow.
+-- Klanten = de bestaande clients (geen tweede klantenadministratie); batch =
+-- clients.batch_id + de bestaande tabel batches. Alles hieronder is
+-- contentplanning-specifiek.
+CREATE TABLE IF NOT EXISTS public.cp_klanten (
+  client_id uuid PRIMARY KEY REFERENCES public.clients(id) ON DELETE CASCADE,
+  actief boolean NOT NULL DEFAULT true,
+  ritme text,                         -- 'maandelijks' | 'driemaandelijks' | NULL = nog in te vullen
+  verantwoordelijke text,
+  goedkeuring_werkdagen integer,
+  activiteiten jsonb NOT NULL DEFAULT '{}'::jsonb,  -- per onderdeel: 'elke_cyclus' | 'per_kwartaal' | 'nvt'
+  contactpersonen jsonb NOT NULL DEFAULT '[]'::jsonb,
+  links jsonb NOT NULL DEFAULT '[]'::jsonb,
+  afspraken text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.cp_cycli (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  maand text NOT NULL,                -- 'YYYY-MM'
+  status text NOT NULL DEFAULT 'actief',  -- actief | gepauzeerd | gearchiveerd
+  instellingen jsonb NOT NULL DEFAULT '{}'::jsonb,  -- momentopname: ritme, batch, activiteiten
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (client_id, maand)
+);
+CREATE TABLE IF NOT EXISTS public.cp_taken (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  cyclus_id uuid REFERENCES public.cp_cycli(id) ON DELETE CASCADE,
+  client_id uuid REFERENCES public.clients(id) ON DELETE CASCADE,
+  onderdeel text NOT NULL DEFAULT 'los',
+  titel text NOT NULL,
+  reeks smallint,
+  werkdatum date,
+  deadline date,
+  startmoment date,                   -- bv. verstuurd voor goedkeuring / feedback ontvangen
+  verantwoordelijke text,
+  status text NOT NULL DEFAULT 'nog_in_te_plannen',
+  sjabloon_sleutel text,              -- uit welk sjabloon; samen met cyclus uniek → nooit dubbel
+  volgorde integer NOT NULL DEFAULT 0,
+  verwijderd_op timestamptz,          -- zacht verwijderd: herstelbaar én wordt niet opnieuw aangemaakt
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+-- Volledige unieke index (NULL-sleutels van losse taken botsen niet); nodig voor ON CONFLICT.
+DROP INDEX IF EXISTS public.cp_taken_sjabloon_uniek;
+CREATE UNIQUE INDEX IF NOT EXISTS cp_taken_sjabloon_uniek ON public.cp_taken (cyclus_id, sjabloon_sleutel);
+CREATE INDEX IF NOT EXISTS cp_taken_werkdatum_idx ON public.cp_taken (werkdatum);
+CREATE INDEX IF NOT EXISTS cp_taken_cyclus_idx ON public.cp_taken (cyclus_id);
+CREATE TABLE IF NOT EXISTS public.cp_notities (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  soort text NOT NULL DEFAULT 'cyclus',   -- afspraak (blijvend) | cyclus | herinnering
+  client_id uuid REFERENCES public.clients(id) ON DELETE CASCADE,
+  taak_id uuid REFERENCES public.cp_taken(id) ON DELETE CASCADE,
+  cyclus_id uuid REFERENCES public.cp_cycli(id) ON DELETE CASCADE,
+  batch_id uuid REFERENCES public.batches(id) ON DELETE CASCADE,
+  reeks smallint,
+  maand text,
+  tekst text NOT NULL,
+  herinner_op date,
+  afgevinkt_op timestamptz,
+  vastgepind boolean NOT NULL DEFAULT false,
+  auteur text,
+  verwijderd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS cp_notities_herinner_idx ON public.cp_notities (herinner_op) WHERE herinner_op IS NOT NULL;
+CREATE TABLE IF NOT EXISTS public.cp_routine_checks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  routine_key text NOT NULL,
+  datum date NOT NULL,
+  door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (routine_key, datum)
+);
+ALTER TABLE public.cp_klanten ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cp_cycli ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cp_taken ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cp_notities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cp_routine_checks ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.cp_klanten, public.cp_cycli, public.cp_taken, public.cp_notities, public.cp_routine_checks FROM anon, authenticated;
+
+-- ── Facturen: recurring-meter en verwijderen (8 okt 2026) ─────────────────────
+-- terugkerende_omzet: NULL = afgeleid (reeks/type), true/false = uitdrukkelijk gekozen.
+-- verwijderd_op: een maand van een reeks die bewust verwijderd is → komt niet terug.
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS terugkerende_omzet boolean;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS verwijderd_op timestamptz;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS verwijderd_door text;
+
+-- ── Contentplanning: Klantenbatches (9 okt 2026) ─────────────────────────────
+-- Per maand per klant: doet deze klant reeks 1/2/3 deze maand (✓ / ✗)?
+-- Geen rij = nog niet beslist. Dit bord bepaalt welke taken klaargezet worden.
+CREATE TABLE IF NOT EXISTS public.cp_maand_reeksen (
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  maand text NOT NULL,
+  reeks smallint NOT NULL CHECK (reeks IN (1, 2, 3)),
+  actief boolean NOT NULL,
+  door text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (client_id, maand, reeks)
+);
+CREATE INDEX IF NOT EXISTS cp_maand_reeksen_maand_idx ON public.cp_maand_reeksen (maand);
+ALTER TABLE public.cp_maand_reeksen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.cp_maand_reeksen FROM anon, authenticated;
+
+-- ── Contentplanning stap 3: dagelijkse werking ──────────────────────────────
+-- Afvinken per klant, maand en reeks (op de rij van het Klantenbatches-bord).
+ALTER TABLE public.cp_maand_reeksen ADD COLUMN IF NOT EXISTS afgewerkt_op date;
+ALTER TABLE public.cp_maand_reeksen ADD COLUMN IF NOT EXISTS afgewerkt_door text;
+-- Waar staat het materiaal (foto's/video's) van deze klant?
+ALTER TABLE public.cp_klanten ADD COLUMN IF NOT EXISTS materiaal text;
+-- Eerste dag van reeks 3: per socialmediaklant beslissen of er volgende maand een meeting komt.
+CREATE TABLE IF NOT EXISTS public.cp_meeting_planning (
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  maand text NOT NULL,
+  status text NOT NULL CHECK (status IN ('nodig', 'niet_nodig', 'ingepland')),
+  door text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (client_id, maand)
+);
+ALTER TABLE public.cp_meeting_planning ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.cp_meeting_planning FROM anon, authenticated;
+
+-- ── Contracten ↔ facturen: aflettering (9 okt 2026) ─────────────────────────
+-- Contractwaarde excl. btw: NULL = ontbreekt (≠ een bewust ingevulde € 0).
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_excl numeric;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_gewijzigd_op timestamptz;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_gewijzigd_door text;
+-- Eén factuur over meerdere contracten: per regel expliciet het contract
+-- (NULL = het contract van de factuur zelf). Zo telt een bedrag nooit dubbel.
+ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS contract_id uuid REFERENCES public.contracts(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS invoice_lines_contract_idx ON public.invoice_lines (contract_id) WHERE contract_id IS NOT NULL;
+-- Factuurvoorstellen vanuit een contract: pas na bevestiging een factuur.
+-- voorstel_sleutel = '<contract_id>:<periode>' → dezelfde periode kan nooit
+-- twee keer actief aangemaakt worden (herhaald klikken / opnieuw genereren).
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS voorstel_sleutel text;
+CREATE UNIQUE INDEX IF NOT EXISTS invoices_voorstel_sleutel_uniek ON public.invoices (voorstel_sleutel)
+  WHERE voorstel_sleutel IS NOT NULL AND status NOT IN ('geannuleerd', 'gecrediteerd');
+-- Verzonden contractmails terugvinden: per verzendpoging de volledige mail.
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS contract_id uuid REFERENCES public.contracts(id) ON DELETE SET NULL;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS cc text;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS bcc text;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS html text;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS from_email text;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS bijlage text;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS provider_status text;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS provider_status_op timestamptz;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+CREATE INDEX IF NOT EXISTS email_messages_contract_idx ON public.email_messages (contract_id, created_at DESC) WHERE contract_id IS NOT NULL;
+-- Kosten "Video editing student": koppeling met Personeel en een momentopname
+-- van uren, tarieven en berekening (latere tariefwijzigingen veranderen niets).
+ALTER TABLE public.cost_entries ADD COLUMN IF NOT EXISTS personeel_id uuid REFERENCES public.personeel(id) ON DELETE SET NULL;
+ALTER TABLE public.cost_entries ADD COLUMN IF NOT EXISTS client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL;
+ALTER TABLE public.cost_entries ADD COLUMN IF NOT EXISTS berekening jsonb;
+
+-- ── Materiaalbeheer & uitleenregistratie (9 okt 2026) ───────────────────────
+CREATE TABLE IF NOT EXISTS public.materiaal_categorieen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam text NOT NULL UNIQUE,
+  volgorde integer NOT NULL DEFAULT 100,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO public.materiaal_categorieen (naam, volgorde) VALUES
+  ('Camera''s', 10), ('Lenzen', 20), ('Audio', 30), ('Verlichting', 40), ('Gimbals', 50),
+  ('Statieven', 60), ('Accessoires', 70), ('Computers', 80), ('Overige', 90)
+ON CONFLICT (naam) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS public.materiaal_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam text NOT NULL,
+  categorie_id uuid REFERENCES public.materiaal_categorieen(id) ON DELETE SET NULL,
+  merk text, model text, serienummer text, foto_pad text,
+  aankoopdatum date, aankoopwaarde numeric, opmerkingen text,
+  gearchiveerd_op timestamptz, gearchiveerd_door text,
+  created_by text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Ontleners: personeel (centrale bron, gekoppeld via personeel_id) + externen zonder account.
+CREATE TABLE IF NOT EXISTS public.materiaal_ontleners (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  personeel_id uuid UNIQUE REFERENCES public.personeel(id) ON DELETE SET NULL,
+  voornaam text NOT NULL, achternaam text, email text, telefoon text,
+  type text CHECK (type IS NULL OR type IN ('werknemer', 'stagiair', 'freelancer', 'jobstudent', 'bestuurder', 'extern')),
+  gearchiveerd_op timestamptz,
+  created_by text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Eén uitleentransactie = precies één fysiek item.
+CREATE TABLE IF NOT EXISTS public.materiaal_uitleningen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id uuid NOT NULL REFERENCES public.materiaal_items(id),
+  ontlener_id uuid NOT NULL REFERENCES public.materiaal_ontleners(id),
+  uitgeleend_op timestamptz NOT NULL,
+  verwacht_terug date,
+  opmerking text,
+  uitgeleend_door text,
+  teruggebracht_op timestamptz,
+  terug_opmerking text,
+  teruggenomen_door text,
+  -- Foutieve registratie administratief ongedaan gemaakt (blijft zichtbaar in de historie).
+  geannuleerd_op timestamptz, geannuleerd_door text, annuleer_reden text,
+  -- Idempotentie: dezelfde handeling (dubbelklik, netwerk) wordt nooit twee keer verwerkt.
+  actie_sleutel text UNIQUE,
+  mail_uit_status text, mail_uit_fout text, mail_uit_id text, mail_uit_op timestamptz,
+  mail_terug_status text, mail_terug_fout text, mail_terug_id text, mail_terug_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+-- Nooit twee actieve uitleningen voor hetzelfde item (ook niet bij twee admins tegelijk).
+CREATE UNIQUE INDEX IF NOT EXISTS materiaal_uitleningen_een_actief ON public.materiaal_uitleningen (item_id) WHERE teruggebracht_op IS NULL AND geannuleerd_op IS NULL;
+CREATE INDEX IF NOT EXISTS materiaal_uitleningen_ontlener_idx ON public.materiaal_uitleningen (ontlener_id, uitgeleend_op DESC);
+
+-- Activiteitenlog: enkel toevoegen, nooit wijzigen of wissen.
+CREATE TABLE IF NOT EXISTS public.materiaal_activiteiten (
+  id bigserial PRIMARY KEY,
+  op timestamptz NOT NULL DEFAULT now(),
+  soort text NOT NULL,
+  item_id uuid REFERENCES public.materiaal_items(id),
+  ontlener_id uuid REFERENCES public.materiaal_ontleners(id),
+  uitlening_id uuid REFERENCES public.materiaal_uitleningen(id),
+  door text,
+  opmerking text,
+  meta jsonb
+);
+CREATE INDEX IF NOT EXISTS materiaal_activiteiten_op_idx ON public.materiaal_activiteiten (op DESC);
+CREATE OR REPLACE FUNCTION public.materiaal_activiteiten_alleen_toevoegen() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'De activiteitenlog van Materiaalbeheer is alleen-lezen.'; END $$;
+DROP TRIGGER IF EXISTS materiaal_activiteiten_geen_wijziging ON public.materiaal_activiteiten;
+CREATE TRIGGER materiaal_activiteiten_geen_wijziging BEFORE UPDATE OR DELETE ON public.materiaal_activiteiten FOR EACH ROW EXECUTE FUNCTION public.materiaal_activiteiten_alleen_toevoegen();
+
+ALTER TABLE public.materiaal_categorieen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.materiaal_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.materiaal_ontleners ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.materiaal_uitleningen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.materiaal_activiteiten ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.materiaal_categorieen, public.materiaal_items, public.materiaal_ontleners, public.materiaal_uitleningen, public.materiaal_activiteiten FROM anon, authenticated;
+
+-- ── Klant past zelf de contentplanner aan (12 okt 2026) ─────────────────────
+-- Wie/wanneer de klant een item aanpaste (zichtbaar voor ons in de admin).
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS klant_gewijzigd_op timestamptz;
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS klant_gewijzigd_door text;
+-- Interne notities: APARTE tabel, want klanten mogen hun eigen items via RLS
+-- lezen — een kolom op social_content_items zou voor hen zichtbaar zijn.
+CREATE TABLE IF NOT EXISTS public.social_content_interne_notities (
+  item_id uuid PRIMARY KEY REFERENCES public.social_content_items(id) ON DELETE CASCADE,
+  notitie text,
+  gewijzigd_door text,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.social_content_interne_notities ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.social_content_interne_notities FROM anon, authenticated;
+-- Klant plant zelf nieuwe content in (12 okt 2026).
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS klant_aangemaakt_op timestamptz;
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS klant_aangemaakt_door text;
+
+-- ── Omzetrapportage (12 okt 2026) ───────────────────────────────────────────
+-- Dienst per factuurregel (NULL = dienst van de factuur, anders "Niet gecategoriseerd").
+ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS service_slug text;
+CREATE INDEX IF NOT EXISTS invoices_invoice_date_idx ON public.invoices (invoice_date);
+CREATE INDEX IF NOT EXISTS invoice_lines_invoice_idx ON public.invoice_lines (invoice_id);
+CREATE INDEX IF NOT EXISTS invoice_lines_recurring_idx ON public.invoice_lines (recurring_id) WHERE recurring_id IS NOT NULL;
+
+-- ── Contentkalender beheren door klant — per klant instelbaar (12 okt 2026) ──
+-- Standaard UIT: bestaande klanten krijgen niet ongemerkt beheerrechten.
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS kalender_beheer boolean NOT NULL DEFAULT false;
+-- 'alle' = alle gebruikers van de klant; 'geselecteerd' = eigenaar (vinkje) + subaccounts met social_media.edit.
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS kalender_beheer_wie text NOT NULL DEFAULT 'alle';
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS kalender_beheer_eigenaar boolean NOT NULL DEFAULT true;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'clients_kalender_beheer_wie_check') THEN
+    ALTER TABLE public.clients ADD CONSTRAINT clients_kalender_beheer_wie_check CHECK (kalender_beheer_wie IN ('alle', 'geselecteerd'));
+  END IF;
+END $$;
+-- Tijdstip en publicatiegegevens van een contentitem.
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS planned_time time;
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS published_url text;
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS published_platform text;
+-- Activiteit per item (wie, wanneer, wat) — blijft bewaard, ook na verwijderen van het item.
+CREATE TABLE IF NOT EXISTS public.social_content_activiteit (
+  id bigserial PRIMARY KEY,
+  item_id uuid NOT NULL,
+  client_id uuid,
+  op timestamptz NOT NULL DEFAULT now(),
+  door text,
+  rol text NOT NULL DEFAULT 'nextgenmedia',
+  actie text NOT NULL,
+  details jsonb
+);
+CREATE INDEX IF NOT EXISTS social_content_activiteit_item_idx ON public.social_content_activiteit (item_id, op DESC);
+ALTER TABLE public.social_content_activiteit ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.social_content_activiteit FROM anon, authenticated;
+-- Klanten wijzigen content ENKEL via de app (rechten op de server); de oude
+-- policy liet eigenaars elke kolom rechtstreeks aanpassen.
+DROP POLICY IF EXISTS clients_review_content ON public.social_content_items;
+
+-- ── Klantportaal: tweestapsverificatie met een authenticator-app (12 okt 2026) ──
+-- Zelfde opslag als intern (user_totp, user_herstelcodes, twofa_sessies), maar
+-- vrijwillig: enkel wie zelf een app activeert, moet bij het inloggen een code geven.
+-- Tweede laag naast de servercontrole: een klant met een actieve app wiens sessie
+-- de tweede stap niet deed, ziet via de gewone databank-API niets van zijn klant.
+-- Alle klantpolicies lopen via clients.owner_user_id, dus één restrictieve
+-- policy op clients sluit ze allemaal.
+CREATE OR REPLACE FUNCTION public.klant_sessie_ok()
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS $$
+  SELECT NOT EXISTS (SELECT 1 FROM public.user_totp t WHERE t.user_id = auth.uid() AND t.actief)
+      OR public.sessie_2fa_ok()
+$$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'clients' AND policyname = 'clients_na_tweede_stap') THEN
+    CREATE POLICY clients_na_tweede_stap ON public.clients AS RESTRICTIVE FOR SELECT USING ((SELECT public.klant_sessie_ok()));
+  END IF;
+END $$;
+
+-- Alle aanmeldsessies van één gebruiker intrekken (admin-reset van de 2FA).
+-- Enkel voor de service-role; nooit voor anon/authenticated.
+CREATE OR REPLACE FUNCTION public.trek_auth_sessies_in(p_user uuid)
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'auth' AS $$
+DECLARE n integer;
+BEGIN
+  DELETE FROM auth.sessions WHERE user_id = p_user;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+END $$;
+REVOKE ALL ON FUNCTION public.trek_auth_sessies_in(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.trek_auth_sessies_in(uuid) TO service_role;
+
+-- ── Contract: verminderingen en creditering (12 okt 2026) ──────────────────
+-- Registreert wanneer niet de volledige contractwaarde benut wordt (onderdeel
+-- geannuleerd, prestatie gaat niet door, niet afgenomen, verminderd, of
+-- gecrediteerd). De oorspronkelijke contractwaarde (contracts.contract_waarde_excl)
+-- blijft ongewijzigd; effectief uit te voeren = contractwaarde − som van deze rijen.
+-- Facturen worden nooit automatisch aangepast; invoice_id koppelt optioneel de
+-- betrokken (credit)factuur. Zacht verwijderen = geschiedenis blijft zichtbaar.
+CREATE TABLE IF NOT EXISTS public.contract_waarde_wijzigingen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+  soort text NOT NULL CHECK (soort IN ('geannuleerd', 'gaat_niet_door', 'niet_afgenomen', 'verminderd', 'gecrediteerd')),
+  onderdeel text,
+  bedrag_excl numeric(12,2) NOT NULL CHECK (bedrag_excl > 0),
+  datum date,
+  reden text,
+  notitie text,
+  invoice_id uuid REFERENCES public.invoices(id) ON DELETE SET NULL,
+  aangemaakt_door text,
+  aangemaakt_op timestamptz NOT NULL DEFAULT now(),
+  gewijzigd_door text,
+  gewijzigd_op timestamptz,
+  verwijderd_op timestamptz,
+  verwijderd_door text
+);
+CREATE INDEX IF NOT EXISTS contract_waarde_wijzigingen_contract_idx ON public.contract_waarde_wijzigingen (contract_id);
+ALTER TABLE public.contract_waarde_wijzigingen ENABLE ROW LEVEL SECURITY;
+
+-- ── Contentkalender: rol per klant (13 okt 2026) ────────────────────────────
+-- Eén rol per klant, voor alle gebruikers van die klant: geen / bekijken /
+-- feedback / meewerken / beheren. Leeg (NULL) = Standaard: de werking van vóór
+-- de rollen (bekijken + goedkeuren of een aanpassing vragen), dus bestaande
+-- klanten behouden hun toegang tot NextGenMedia een rol kiest. Er wordt geen
+-- bestaande data gewijzigd. Subaccounts houden binnen de rol hun eigen rechten.
+-- Opmerkingen bij items gebruiken het bestaande social_content_activiteit
+-- (actie 'opmerking'); daar is geen nieuwe tabel voor nodig.
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS kalender_rol text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'clients_kalender_rol_check') THEN
+    ALTER TABLE public.clients ADD CONSTRAINT clients_kalender_rol_check
+      CHECK (kalender_rol IS NULL OR kalender_rol IN ('geen', 'bekijken', 'feedback', 'meewerken', 'beheren'));
+  END IF;
+END $$;
+-- Tweede laag naast de servercontrole: een eigenaar met rol "Geen toegang" leest
+-- ook via de gewone databank-API geen contentitems meer. Het interne team (geen
+-- eigenaar van die klant) en de service-role merken hier niets van.
+CREATE OR REPLACE FUNCTION public.kalender_dicht_voor_mij(p_client uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS $$
+  SELECT EXISTS (SELECT 1 FROM public.clients c WHERE c.id = p_client AND c.owner_user_id = auth.uid() AND c.kalender_rol = 'geen')
+$$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'social_content_items' AND policyname = 'social_content_kalender_rol') THEN
+    CREATE POLICY social_content_kalender_rol ON public.social_content_items AS RESTRICTIVE FOR SELECT
+      USING (NOT public.kalender_dicht_voor_mij(client_id));
+  END IF;
+END $$;
+
+-- ── Goedkeuring aanvragen: termijn in dagen + gekoppelde mail (13 okt 2026) ──
+-- "Goedkeuring aanvragen" in de editworkflow: een termijn in dagen (3/5/7…)
+-- waaruit de deadline berekend wordt, wanneer de goedkeuring gevraagd werd, en
+-- welke mail voor DEZE deadline vertrok (met de deadline die erin stond). Een
+-- latere wijziging van de deadline verstuurt niets opnieuw; de app toont dan
+-- dat de mail nog de oude datum vermeldde. Geen bestaande data gewijzigd.
+ALTER TABLE public.content_goedkeuring_deadlines ADD COLUMN IF NOT EXISTS termijn_dagen int;
+ALTER TABLE public.content_goedkeuring_deadlines ADD COLUMN IF NOT EXISTS aangevraagd_op timestamptz;
+ALTER TABLE public.content_goedkeuring_deadlines ADD COLUMN IF NOT EXISTS mail_verstuurd_op timestamptz;
+ALTER TABLE public.content_goedkeuring_deadlines ADD COLUMN IF NOT EXISTS mail_deadline date;
+ALTER TABLE public.content_goedkeuring_deadlines ADD COLUMN IF NOT EXISTS mail_message_id uuid;
+-- Eén verzendpoging = één sleutel: dezelfde klik (dubbelklik, netwerk dat
+-- opnieuw probeert) verstuurt nooit twee keer dezelfde mail.
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS verzend_sleutel text;
+CREATE UNIQUE INDEX IF NOT EXISTS email_messages_verzend_sleutel_uniek ON public.email_messages (verzend_sleutel) WHERE verzend_sleutel IS NOT NULL;
+
+-- ── Vesting: eigen toerekeningspercentage + WAM ↔ contract (14 okt 2026) ────
+-- toerekening_pct: leeg = zoals altijd (50% appointment + 50% closing); ingevuld
+-- (0–100) = dat percentage geldt voor dit contract.
+ALTER TABLE public.vesting_contracten ADD COLUMN IF NOT EXISTS toerekening_pct numeric(5,2);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'vesting_contracten_toerekening_pct_check') THEN
+    ALTER TABLE public.vesting_contracten ADD CONSTRAINT vesting_contracten_toerekening_pct_check CHECK (toerekening_pct IS NULL OR (toerekening_pct >= 0 AND toerekening_pct <= 100));
+  END IF;
+END $$;
+ALTER TABLE public.vesting_wam ADD COLUMN IF NOT EXISTS contract_id uuid REFERENCES public.contracts(id) ON DELETE SET NULL;
+
+-- ── Contract "op getekend zetten" (19 okt 2026) ─────────────────────────────
+-- Een contract dat buiten de app ondertekend werd (bv. per mail bevestigd)
+-- handmatig op getekend zetten, met een optionele notitie en bijlagen (bv. het
+-- mailverkeer). ondertekening_wijze = 'manueel'; NULL = getekend via de
+-- tekenlink of geüpload als getekende PDF. Zo'n contract krijgt geen
+-- e-handtekeningcertificaat en geen Legal-melding. Geen bestaande data gewijzigd.
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ondertekening_wijze text;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ondertekening_notitie text;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ondertekening_door text;
+CREATE TABLE IF NOT EXISTS public.contract_bijlagen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+  naam text NOT NULL,
+  pad text NOT NULL,
+  grootte integer,
+  mime text,
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS contract_bijlagen_contract_idx ON public.contract_bijlagen (contract_id);
+ALTER TABLE public.contract_bijlagen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.contract_bijlagen FROM anon, authenticated;
+
+-- ── Vesting: vroegtijdig stopgezet op het betaalde bedrag (20 okt 2026) ─────
+-- Bij status "Vroegtijdig stopgezet" telt Marco's vesting op wat de klant
+-- werkelijk betaalde (× zijn toerekening), niet op de volledige contractwaarde.
+-- Leeg = nog niet ingevuld; dan telt het contract voor €0 zoals voorheen.
+ALTER TABLE public.vesting_contracten ADD COLUMN IF NOT EXISTS betaald_bij_stop numeric(12,2);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'vesting_contracten_betaald_bij_stop_check') THEN
+    ALTER TABLE public.vesting_contracten ADD CONSTRAINT vesting_contracten_betaald_bij_stop_check CHECK (betaald_bij_stop IS NULL OR betaald_bij_stop >= 0);
+  END IF;
+END $$;
+
+-- ── Contractstatus "niet geaccepteerd" (21 okt 2026) ───────────────────────
+-- Naast "geannuleerd": de klant heeft het contract niet aanvaard of niet
+-- ondertekend. Puur verruimend (de bestaande waarden blijven toegelaten), geen
+-- data gewijzigd. Houd deze lijst gelijk met ALIAS in lib/contract-status.ts.
+ALTER TABLE public.contracts DROP CONSTRAINT IF EXISTS contracts_status_check;
+ALTER TABLE public.contracts ADD CONSTRAINT contracts_status_check CHECK (
+  status IN (
+    'draft', 'sent', 'viewed', 'opened', 'filled', 'signed',
+    'cancelled', 'canceled', 'expired', 'replaced', 'template', 'declined',
+    'klaar_voor_verzenden', 'verzonden', 'geopend', 'ingevuld',
+    'getekend', 'geannuleerd', 'verlopen', 'vervangen', 'niet_geaccepteerd'
+  )
+);
+
+-- ── Klantmeetings (23 okt 2026) ─────────────────────────────────────────────
+-- Een meeting met een klant plannen vanuit de app: echte Google Calendar-
+-- afspraak met Meet (bestaande koppeling sales_calendar_connections), ClickUp-
+-- taak volgens de bestaande afsprakenwerkwijze (lijst van het merk, eigenaar
+-- van de agenda, annuleren = [GEANNULEERD] + gesloten) en een herinneringsmail
+-- aan de bevestigde klantontvanger(s). Elke stap heeft een eigen status, zodat
+-- een fout in één stap zichtbaar blijft en veilig opnieuw geprobeerd kan worden.
+-- Geen bestaande data gewijzigd.
+CREATE TABLE IF NOT EXISTS public.klant_meetings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- Eén plan-actie = één sleutel: een tweede klik of een herhaald verzoek na een
+  -- time-out maakt nooit een tweede meeting aan.
+  aanvraag_sleutel text,
+  client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  klant_naam text NOT NULL,
+  titel text NOT NULL,
+  beschrijving text,
+  starts_at timestamptz NOT NULL,
+  ends_at timestamptz NOT NULL,
+  tijdzone text NOT NULL DEFAULT 'Europe/Brussels',
+  status text NOT NULL DEFAULT 'ingepland',
+  agenda_id uuid REFERENCES public.sales_calendar_connections(id) ON DELETE SET NULL,
+  organisator_naam text,
+  organisator_email text,
+  -- [{naam, email}] — ontvangen de uitnodiging én de herinnering.
+  klant_ontvangers jsonb NOT NULL DEFAULT '[]'::jsonb,
+  -- [{naam, email}] — enkel genodigd op de agenda-afspraak.
+  deelnemers jsonb NOT NULL DEFAULT '[]'::jsonb,
+  herinnering_aan boolean NOT NULL DEFAULT true,
+  google_event_id text,
+  google_calendar_id text,
+  meet_url text,
+  google_status text NOT NULL DEFAULT 'wacht',
+  google_fout text,
+  clickup_task_id text,
+  clickup_list_id text,
+  clickup_status text NOT NULL DEFAULT 'wacht',
+  clickup_fout text,
+  clickup_gestart_op timestamptz,
+  created_by uuid,
+  created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  geannuleerd_op timestamptz,
+  geannuleerd_door text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS klant_meetings_aanvraag_uniek ON public.klant_meetings (aanvraag_sleutel) WHERE aanvraag_sleutel IS NOT NULL;
+CREATE INDEX IF NOT EXISTS klant_meetings_start ON public.klant_meetings (starts_at);
+CREATE INDEX IF NOT EXISTS klant_meetings_client ON public.klant_meetings (client_id);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meetings_status_check') THEN
+    ALTER TABLE public.klant_meetings ADD CONSTRAINT klant_meetings_status_check CHECK (status IN ('ingepland', 'geannuleerd'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meetings_tijd_check') THEN
+    ALTER TABLE public.klant_meetings ADD CONSTRAINT klant_meetings_tijd_check CHECK (ends_at > starts_at);
+  END IF;
+END $$;
+ALTER TABLE public.klant_meetings ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.klant_meetings FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.klant_meeting_herinneringen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  meeting_id uuid NOT NULL REFERENCES public.klant_meetings(id) ON DELETE CASCADE,
+  moment text NOT NULL,
+  gepland_voor timestamptz NOT NULL,
+  ontvangers jsonb NOT NULL DEFAULT '[]'::jsonb,
+  status text NOT NULL DEFAULT 'gepland',
+  -- Ook de idempotentiesleutel bij de mailprovider: opnieuw proberen verstuurt nooit twee keer.
+  verzend_sleutel text NOT NULL,
+  provider_id text,
+  email_message_id uuid,
+  fout text,
+  pogingen int NOT NULL DEFAULT 0,
+  bezig_sinds timestamptz,
+  verzonden_op timestamptz,
+  geannuleerd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS klant_meeting_herinnering_sleutel ON public.klant_meeting_herinneringen (verzend_sleutel);
+-- Nooit twee lopende herinneringen voor dezelfde meeting.
+CREATE UNIQUE INDEX IF NOT EXISTS klant_meeting_herinnering_actief ON public.klant_meeting_herinneringen (meeting_id) WHERE status IN ('gepland', 'bezig', 'mislukt');
+CREATE INDEX IF NOT EXISTS klant_meeting_herinnering_te_doen ON public.klant_meeting_herinneringen (gepland_voor) WHERE status = 'gepland';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meeting_herinnering_status_check') THEN
+    ALTER TABLE public.klant_meeting_herinneringen ADD CONSTRAINT klant_meeting_herinnering_status_check
+      CHECK (status IN ('gepland', 'bezig', 'verzonden', 'mislukt', 'geannuleerd', 'overgeslagen'));
+  END IF;
+END $$;
+ALTER TABLE public.klant_meeting_herinneringen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.klant_meeting_herinneringen FROM anon, authenticated;
+
+-- Scheduler: pg_cron roept elke 5 minuten de herinneringsroute aan, met een eigen
+-- geheim (zelfde opzet als de ClickUp-agenda-sync). Zo hangt de herinnering
+-- nooit af van een open browser of van de dagelijkse Vercel-cron.
+INSERT INTO public.cron_geheimen (sleutel, waarde)
+SELECT 'klantmeetings', replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')
+WHERE NOT EXISTS (SELECT 1 FROM public.cron_geheimen WHERE sleutel = 'klantmeetings');
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron')
+     AND NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'klantmeetings-herinneringen') THEN
+    PERFORM cron.schedule('klantmeetings-herinneringen', '*/5 * * * *', $cmd$
+      SELECT net.http_post(
+        url := 'https://app.nextgenmedia.be/api/cron/klantmeetings',
+        headers := jsonb_build_object(
+          'Content-Type', 'application/json',
+          'x-sync-secret', (SELECT waarde FROM public.cron_geheimen WHERE sleutel = 'klantmeetings')
+        ),
+        body := '{}'::jsonb,
+        timeout_milliseconds := 55000
+      );
+    $cmd$);
+  END IF;
+END $$;
+
+-- ── Meetingplanner (23 okt 2026) ────────────────────────────────────────────
+-- Meetings zonder klant (client_id was al optioneel), optionele koppeling aan
+-- een project (opdracht) of ClickUp-item, en de uitnodiging die Google
+-- verstuurt als aparte, zichtbare stap. Additief; geen bestaande data gewijzigd.
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS project_id uuid;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS clickup_item_id text;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS uitnodiging_status text NOT NULL DEFAULT 'wacht';
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS uitnodiging_op timestamptz;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS uitnodiging_naar jsonb NOT NULL DEFAULT '[]'::jsonb;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meetings_project_fk')
+     AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'opdrachten') THEN
+    ALTER TABLE public.klant_meetings ADD CONSTRAINT klant_meetings_project_fk FOREIGN KEY (project_id) REFERENCES public.opdrachten(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- ── Meeting Inplanner + klantboekingen (24 okt 2026) ────────────────────────
+-- Klanten boeken zelf een gratis meeting (bron 'klantboeking'); interne meetings
+-- kunnen aan een pipeline-lead hangen; herinneringen ook voor verkoopafspraken.
+-- Additief: geen bestaande data gewijzigd.
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS bron text NOT NULL DEFAULT 'intern';
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS lead_id uuid;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS boeker_bedrijf text;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS boeker_reden text;
+-- Enkel de hash van de beheerlink; de link zelf staat alleen in de mail aan de klant.
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS beheer_token_hash text;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS bevestiging_status text;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS bevestiging_op timestamptz;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS bevestiging_fout text;
+CREATE UNIQUE INDEX IF NOT EXISTS klant_meetings_beheer_token ON public.klant_meetings (beheer_token_hash) WHERE beheer_token_hash IS NOT NULL;
+-- Twee klanten kunnen nooit tegelijk hetzelfde moment in dezelfde agenda boeken.
+CREATE UNIQUE INDEX IF NOT EXISTS klant_meetings_klantslot ON public.klant_meetings (agenda_id, starts_at) WHERE bron = 'klantboeking' AND status = 'ingepland';
+CREATE INDEX IF NOT EXISTS klant_meetings_lead ON public.klant_meetings (lead_id) WHERE lead_id IS NOT NULL;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meetings_bron_check') THEN
+    ALTER TABLE public.klant_meetings ADD CONSTRAINT klant_meetings_bron_check CHECK (bron IN ('intern', 'klantboeking'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meetings_lead_fk')
+     AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'sales_leads') THEN
+    ALTER TABLE public.klant_meetings ADD CONSTRAINT klant_meetings_lead_fk FOREIGN KEY (lead_id) REFERENCES public.sales_leads(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+ALTER TABLE public.klant_meeting_herinneringen ALTER COLUMN meeting_id DROP NOT NULL;
+ALTER TABLE public.klant_meeting_herinneringen ADD COLUMN IF NOT EXISTS afspraak_id uuid;
+CREATE UNIQUE INDEX IF NOT EXISTS klant_meeting_herinnering_afspraak_actief ON public.klant_meeting_herinneringen (afspraak_id) WHERE afspraak_id IS NOT NULL AND status IN ('gepland', 'bezig', 'mislukt');
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meeting_herinnering_doel_check') THEN
+    ALTER TABLE public.klant_meeting_herinneringen ADD CONSTRAINT klant_meeting_herinnering_doel_check CHECK (meeting_id IS NOT NULL OR afspraak_id IS NOT NULL);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meeting_herinnering_afspraak_fk')
+     AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'sales_appointments') THEN
+    ALTER TABLE public.klant_meeting_herinneringen ADD CONSTRAINT klant_meeting_herinnering_afspraak_fk FOREIGN KEY (afspraak_id) REFERENCES public.sales_appointments(id) ON DELETE CASCADE;
+  END IF;
+END $$;
+-- Voor welk startuur geldt een herinnering? Zo plant een latere kleine wijziging
+-- (titel, notitie) nooit een tweede herinnering voor hetzelfde uur, ook niet na
+-- een handmatige herverzending.
+ALTER TABLE public.klant_meeting_herinneringen ADD COLUMN IF NOT EXISTS voor_start timestamptz;
+
+-- ── Calendar: gsm-melding 15 minuten vooraf ─────────────────────────────────
+-- Of de Google-popup (15 min) echt op het event staat. 'ingesteld' | 'mislukt'
+-- | NULL (nog niet gecontroleerd: de scheduler zet ze dan). Additief.
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS gsm_melding_status text;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS gsm_melding_fout text;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'sales_appointments') THEN
+    ALTER TABLE public.sales_appointments ADD COLUMN IF NOT EXISTS gsm_melding_status text;
+    ALTER TABLE public.sales_appointments ADD COLUMN IF NOT EXISTS gsm_melding_fout text;
+  END IF;
+END $$;
+
+-- ── Meeting Inplanner: online of op locatie ─────────────────────────────────
+-- vorm: 'online' (Google Meet) | 'locatie' (adres in locatie). met_meet: ook bij
+-- een meeting op locatie kan je bewust een Meet-link vragen. Bestaande meetings
+-- en klantboekingen blijven online met Meet (de standaardwaarden). Additief.
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS vorm text NOT NULL DEFAULT 'online';
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS locatie text;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS met_meet boolean NOT NULL DEFAULT true;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meetings_vorm_check') THEN
+    ALTER TABLE public.klant_meetings ADD CONSTRAINT klant_meetings_vorm_check CHECK (vorm IN ('online', 'locatie'));
+  END IF;
+END $$;
+
+-- ── Pipeline: taken bij een lead (ClickUp) ──────────────────────────────────
+-- Een gewone ClickUp-taak (deadline zonder uur, geen agenda-item) gekoppeld aan
+-- een lead, in de lijst van NextGenMedia of NextGenSolutions, met een link naar
+-- de lead in de omschrijving. clickup_status is de laatst gelezen status uit
+-- ClickUp. Additief.
+CREATE TABLE IF NOT EXISTS public.sales_lead_taken (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id uuid NOT NULL REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  aanvraag_sleutel text,
+  omschrijving text NOT NULL,
+  notitie text,
+  deadline date,
+  merk text NOT NULL,
+  clickup_list_id text,
+  clickup_assignee_id bigint,
+  clickup_assignee_naam text,
+  clickup_task_id text,
+  clickup_url text,
+  clickup_status text,
+  clickup_status_kleur text,
+  clickup_status_type text,
+  status_gelezen_op timestamptz,
+  sync_status text NOT NULL DEFAULT 'wacht',
+  sync_fout text,
+  created_by uuid,
+  created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS sales_lead_taken_aanvraag ON public.sales_lead_taken (aanvraag_sleutel) WHERE aanvraag_sleutel IS NOT NULL;
+CREATE INDEX IF NOT EXISTS sales_lead_taken_lead ON public.sales_lead_taken (lead_id, created_at DESC);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'sales_lead_taken_merk_check') THEN
+    ALTER TABLE public.sales_lead_taken ADD CONSTRAINT sales_lead_taken_merk_check CHECK (merk IN ('nextgenmedia', 'nextgensolutions'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'sales_lead_taken_sync_check') THEN
+    ALTER TABLE public.sales_lead_taken ADD CONSTRAINT sales_lead_taken_sync_check CHECK (sync_status IN ('wacht', 'ok', 'fout'));
+  END IF;
+END $$;
+ALTER TABLE public.sales_lead_taken ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.sales_lead_taken FROM anon, authenticated;
+
+-- ── Aanvragen: diensten en consultancy vanuit het klantportaal ──────────────
+-- Een aanvraag is GEEN opdracht en GEEN boeking: de klant geeft een wens en
+-- gewenste timing door, wij beoordelen scope, offerte en planning. Additief.
+CREATE TABLE IF NOT EXISTS public.klant_aanvragen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  soort text NOT NULL,
+  type text NOT NULL,
+  type_label text NOT NULL,
+  wat text NOT NULL,
+  briefing text,
+  aandachtspunten text,
+  antwoorden jsonb NOT NULL DEFAULT '{}'::jsonb,
+  periode_van date,
+  periode_tot date,
+  voorkeursdagen text[] NOT NULL DEFAULT '{}',
+  tijdstippen text[] NOT NULL DEFAULT '{}',
+  locatie text,
+  deadline date,
+  expert_id uuid REFERENCES public.personeel(id) ON DELETE SET NULL,
+  expert_naam text,
+  status text NOT NULL DEFAULT 'ontvangen',
+  status_gewijzigd_op timestamptz,
+  scope text,
+  scope_notitie text,
+  toegewezen_id uuid REFERENCES public.personeel(id) ON DELETE SET NULL,
+  toegewezen_naam text,
+  planning_datum date,
+  planning_notitie text,
+  reden_klant text,
+  interne_notitie text,
+  offerte_titel text,
+  offerte_pad text,
+  offerte_url text,
+  offerte_bestandsnaam text,
+  offerte_notitie text,
+  offerte_status text,
+  offerte_verstuurd_op timestamptz,
+  offerte_beslist_op timestamptz,
+  offerte_beslist_door text,
+  offerte_reden text,
+  clickup_task_id text,
+  clickup_url text,
+  clickup_status text NOT NULL DEFAULT 'wacht',
+  clickup_fout text,
+  aanvraag_sleutel text,
+  ingediend_door_id uuid,
+  ingediend_door_email text,
+  ingediend_door_naam text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS klant_aanvragen_sleutel ON public.klant_aanvragen (aanvraag_sleutel) WHERE aanvraag_sleutel IS NOT NULL;
+CREATE INDEX IF NOT EXISTS klant_aanvragen_klant ON public.klant_aanvragen (client_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS klant_aanvragen_soort ON public.klant_aanvragen (soort, status, created_at DESC);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_soort_check') THEN
+    ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_soort_check CHECK (soort IN ('dienst', 'consultancy'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_status_check') THEN
+    ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_status_check CHECK (status IN ('ontvangen', 'in_behandeling', 'offerte', 'aanvaard', 'ingepland', 'afgerond', 'afgewezen', 'ingetrokken'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_scope_check') THEN
+    ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_scope_check CHECK (scope IS NULL OR scope IN ('binnen', 'buiten'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_offerte_check') THEN
+    ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_offerte_check CHECK (offerte_status IS NULL OR offerte_status IN ('open', 'aanvaard', 'geweigerd'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_clickup_check') THEN
+    ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_clickup_check CHECK (clickup_status IN ('wacht', 'ok', 'fout'));
+  END IF;
+END $$;
+ALTER TABLE public.klant_aanvragen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.klant_aanvragen FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.klant_aanvraag_bestanden (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  aanvraag_id uuid NOT NULL REFERENCES public.klant_aanvragen(id) ON DELETE CASCADE,
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  pad text NOT NULL,
+  bestandsnaam text NOT NULL,
+  mimetype text,
+  grootte bigint,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS klant_aanvraag_bestanden_aanvraag ON public.klant_aanvraag_bestanden (aanvraag_id);
+ALTER TABLE public.klant_aanvraag_bestanden ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.klant_aanvraag_bestanden FROM anon, authenticated;
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('aanvragen', 'aanvragen', false, 104857600)
+ON CONFLICT (id) DO NOTHING;
+
+-- Expertprofiel in Personeel: wie klanten als expert mogen kiezen, met rollen
+-- en expertises (vaste lijst in lib/aanvragen/model.ts). Standaard NIET zichtbaar.
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS expert_zichtbaar boolean NOT NULL DEFAULT false;
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS expert_rollen text[] NOT NULL DEFAULT '{}';
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS expertises text[] NOT NULL DEFAULT '{}';
+
+-- Aanvragen: de ClickUp-taak staat op de gekozen expert (of wie het team
+-- aanduidt). Koppeling teamlid → ClickUp-gebruiker, in te stellen in Personeel.
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS clickup_user_id bigint;
+-- Interne melding naar info@nextgenmedia.be bij een nieuwe aanvraag.
+ALTER TABLE public.klant_aanvragen ADD COLUMN IF NOT EXISTS team_mail_status text;
+ALTER TABLE public.klant_aanvragen ADD COLUMN IF NOT EXISTS team_mail_fout text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_team_mail_status_check') THEN
+    ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_team_mail_status_check CHECK (team_mail_status IS NULL OR team_mail_status IN ('ok', 'fout'));
+  END IF;
+END $$;
+
+-- ── Content voor klanten (31 okt 2026): Onze partners, Founders of Flanders, Nieuwsbrieven ──
+-- Afbeeldingen (nieuwsbrieven, partnerlogo's) in een PUBLIEKE bucket: ze staan in
+-- de klantapp én in de nieuwsbriefmail. Video's nooit opladen: altijd YouTube.
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('marketing', 'marketing', true, 15728640)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS public.onze_partners (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam text NOT NULL,
+  korte_uitleg text,
+  logo_pad text,
+  website text,
+  instagram text,
+  facebook text,
+  linkedin text,
+  tiktok text,
+  youtube text,
+  volgorde integer NOT NULL DEFAULT 0,
+  zichtbaar boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.onze_partners ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.onze_partners FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.founders_videos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  titel text NOT NULL,
+  ondernemer text,
+  bedrijf text,
+  beschrijving text,
+  youtube_id text NOT NULL,
+  volgorde integer NOT NULL DEFAULT 0,
+  zichtbaar boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.founders_videos ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.founders_videos FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.nieuwsbrieven (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  titel text NOT NULL,
+  slug text NOT NULL,
+  categorie text NOT NULL DEFAULT 'nieuws',
+  samenvatting text,
+  cover_pad text,
+  cover_youtube_id text,
+  blokken jsonb NOT NULL DEFAULT '[]'::jsonb,
+  status text NOT NULL DEFAULT 'concept',
+  uitgelicht boolean NOT NULL DEFAULT false,
+  gepubliceerd_op timestamptz,
+  auteur_naam text,
+  mail_verstuurd_op timestamptz,
+  mail_aantal integer,
+  created_by uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS nieuwsbrieven_slug ON public.nieuwsbrieven (slug);
+CREATE INDEX IF NOT EXISTS nieuwsbrieven_feed ON public.nieuwsbrieven (status, gepubliceerd_op DESC);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nieuwsbrieven_status_check') THEN
+    ALTER TABLE public.nieuwsbrieven ADD CONSTRAINT nieuwsbrieven_status_check CHECK (status IN ('concept', 'gepubliceerd'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nieuwsbrieven_categorie_check') THEN
+    ALTER TABLE public.nieuwsbrieven ADD CONSTRAINT nieuwsbrieven_categorie_check CHECK (categorie IN ('projecten', 'klant_in_de_kijker', 'tips', 'nieuws', 'team'));
+  END IF;
+END $$;
+ALTER TABLE public.nieuwsbrieven ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.nieuwsbrieven FROM anon, authenticated;
+
+-- Eén regel per ontvanger per nieuwsbrief: nooit twee keer dezelfde mail.
+CREATE TABLE IF NOT EXISTS public.nieuwsbrief_verzendingen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nieuwsbrief_id uuid NOT NULL REFERENCES public.nieuwsbrieven(id) ON DELETE CASCADE,
+  email text NOT NULL,
+  client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  status text NOT NULL DEFAULT 'verstuurd',
+  resend_id text,
+  fout text,
+  verstuurd_door text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS nieuwsbrief_verzendingen_uniek ON public.nieuwsbrief_verzendingen (nieuwsbrief_id, lower(email));
+ALTER TABLE public.nieuwsbrief_verzendingen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.nieuwsbrief_verzendingen FROM anon, authenticated;
+
+-- Afgemeld voor de nieuwsbrief per mail (via de link onderaan elke mail).
+CREATE TABLE IF NOT EXISTS public.nieuwsbrief_afmeldingen (
+  email text PRIMARY KEY,
+  afgemeld_op timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.nieuwsbrief_afmeldingen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.nieuwsbrief_afmeldingen FROM anon, authenticated;
+
+-- Aanvragen: derde soort "founders" (Founders of Flanders) naast diensten en consultancy.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_soort_check'
+             AND pg_get_constraintdef(oid) NOT LIKE '%founders%') THEN
+    ALTER TABLE public.klant_aanvragen DROP CONSTRAINT klant_aanvragen_soort_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_soort_check') THEN
+    ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_soort_check CHECK (soort IN ('dienst', 'consultancy', 'founders'));
+  END IF;
+END $$;
+
+-- ── Workshops & events (31 okt 2026) ─────────────────────────────────────────
+-- Webinars, workshops, events en opleidingen waar klanten zich in de klantapp
+-- voor inschrijven. Betalend of gratis; betalen gebeurt nooit in de app (wie
+-- inschrijft gaat akkoord met een Peppol-factuur achteraf). Elk event heeft een
+-- Google-agenda-event (online: met Meet); inschrijvers komen stil op de
+-- gastenlijst en krijgen van de app één bevestiging en één herinnering.
+CREATE TABLE IF NOT EXISTS public.klant_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  titel text NOT NULL,
+  soort text NOT NULL DEFAULT 'workshop',
+  status text NOT NULL DEFAULT 'concept',
+  samenvatting text,
+  beschrijving text,
+  cover_pad text,
+  spreker text,
+  start_op timestamptz NOT NULL,
+  einde_op timestamptz NOT NULL,
+  tijdzone text NOT NULL DEFAULT 'Europe/Brussels',
+  vorm text NOT NULL DEFAULT 'online',
+  locatie text,
+  met_meet boolean NOT NULL DEFAULT true,
+  capaciteit integer,
+  prijs_cents integer NOT NULL DEFAULT 0,
+  inschrijven_tot timestamptz,
+  agenda_id uuid REFERENCES public.sales_calendar_connections(id) ON DELETE SET NULL,
+  google_calendar_id text,
+  google_event_id text,
+  google_ical_uid text,
+  meet_url text,
+  google_status text NOT NULL DEFAULT 'nog_niet',
+  google_fout text,
+  -- Gastenlijst in Google: inschrijving_versie stijgt bij elke (uit)schrijving;
+  -- google_sync_versie is wat er in Google staat. Verschil = nog bij te werken.
+  inschrijving_versie integer NOT NULL DEFAULT 0,
+  google_sync_versie integer NOT NULL DEFAULT 0,
+  gepubliceerd_op timestamptz,
+  geannuleerd_op timestamptz,
+  created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_soort_check') THEN
+    ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_soort_check CHECK (soort IN ('webinar', 'workshop', 'event', 'opleiding'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_status_check') THEN
+    ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_status_check CHECK (status IN ('concept', 'gepubliceerd', 'geannuleerd'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_vorm_check') THEN
+    ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_vorm_check CHECK (vorm IN ('online', 'locatie'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_google_status_check') THEN
+    ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_google_status_check CHECK (google_status IN ('nog_niet', 'ok', 'fout', 'geannuleerd'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_tijd_check') THEN
+    ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_tijd_check CHECK (einde_op > start_op);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_bedragen_check') THEN
+    ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_bedragen_check CHECK (prijs_cents >= 0 AND (capaciteit IS NULL OR capaciteit > 0));
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS klant_events_start_idx ON public.klant_events (start_op);
+ALTER TABLE public.klant_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.klant_events FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.klant_event_inschrijvingen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id uuid NOT NULL REFERENCES public.klant_events(id) ON DELETE CASCADE,
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  ingeschreven_door_auth uuid,
+  ingeschreven_door_naam text,
+  naam text NOT NULL,
+  email text NOT NULL,
+  status text NOT NULL DEFAULT 'ingeschreven',
+  prijs_cents integer NOT NULL DEFAULT 0,
+  akkoord_factuur_op timestamptz,
+  akkoord_tekst text,
+  factuur_status text NOT NULL DEFAULT 'geen',
+  bevestiging_status text NOT NULL DEFAULT 'nog_niet',
+  bevestiging_op timestamptz,
+  bevestiging_fout text,
+  herinnering_status text NOT NULL DEFAULT 'gepland',
+  herinnering_op timestamptz,
+  herinnering_bezig_sinds timestamptz,
+  herinnering_fout text,
+  geannuleerd_op timestamptz,
+  geannuleerd_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_event_inschr_status_check') THEN
+    ALTER TABLE public.klant_event_inschrijvingen ADD CONSTRAINT klant_event_inschr_status_check CHECK (status IN ('ingeschreven', 'geannuleerd'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_event_inschr_factuur_check') THEN
+    ALTER TABLE public.klant_event_inschrijvingen ADD CONSTRAINT klant_event_inschr_factuur_check CHECK (factuur_status IN ('geen', 'te_factureren', 'gefactureerd'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_event_inschr_bevestiging_check') THEN
+    ALTER TABLE public.klant_event_inschrijvingen ADD CONSTRAINT klant_event_inschr_bevestiging_check CHECK (bevestiging_status IN ('nog_niet', 'verzonden', 'mislukt', 'overgeslagen'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_event_inschr_herinnering_check') THEN
+    ALTER TABLE public.klant_event_inschrijvingen ADD CONSTRAINT klant_event_inschr_herinnering_check CHECK (herinnering_status IN ('gepland', 'bezig', 'verzonden', 'mislukt', 'overgeslagen'));
+  END IF;
+END $$;
+-- Eén actieve inschrijving per e-mailadres per event.
+CREATE UNIQUE INDEX IF NOT EXISTS klant_event_inschr_uniek ON public.klant_event_inschrijvingen (event_id, lower(email)) WHERE status = 'ingeschreven';
+CREATE INDEX IF NOT EXISTS klant_event_inschr_client_idx ON public.klant_event_inschrijvingen (client_id);
+ALTER TABLE public.klant_event_inschrijvingen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.klant_event_inschrijvingen FROM anon, authenticated;
+
+-- Inschrijven in één transactie: het event wordt vergrendeld, zodat twee
+-- inschrijvingen tegelijk nooit samen over de capaciteit gaan.
+CREATE OR REPLACE FUNCTION public.klant_event_inschrijven(
+  p_event uuid, p_client uuid, p_door_auth uuid, p_door_naam text, p_deelnemers jsonb, p_akkoord_tekst text
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  e public.klant_events%ROWTYPE;
+  d jsonb;
+  bezet integer;
+  aantal integer := jsonb_array_length(p_deelnemers);
+  ids jsonb := '[]'::jsonb;
+  nieuw uuid;
+BEGIN
+  SELECT * INTO e FROM public.klant_events WHERE id = p_event FOR UPDATE;
+  IF NOT FOUND THEN RETURN jsonb_build_object('fout', 'niet_gevonden'); END IF;
+  IF e.status <> 'gepubliceerd' THEN RETURN jsonb_build_object('fout', 'niet_open'); END IF;
+  IF e.start_op <= now() THEN RETURN jsonb_build_object('fout', 'voorbij'); END IF;
+  IF e.inschrijven_tot IS NOT NULL AND e.inschrijven_tot < now() THEN RETURN jsonb_build_object('fout', 'gesloten'); END IF;
+  IF aantal < 1 THEN RETURN jsonb_build_object('fout', 'geen_deelnemers'); END IF;
+  FOR d IN SELECT * FROM jsonb_array_elements(p_deelnemers) LOOP
+    IF EXISTS (SELECT 1 FROM public.klant_event_inschrijvingen
+               WHERE event_id = p_event AND status = 'ingeschreven' AND lower(email) = lower(d->>'email')) THEN
+      RETURN jsonb_build_object('fout', 'al_ingeschreven', 'email', d->>'email');
+    END IF;
+  END LOOP;
+  IF e.capaciteit IS NOT NULL THEN
+    SELECT count(*) INTO bezet FROM public.klant_event_inschrijvingen WHERE event_id = p_event AND status = 'ingeschreven';
+    IF bezet + aantal > e.capaciteit THEN
+      RETURN jsonb_build_object('fout', 'volzet', 'vrij', greatest(e.capaciteit - bezet, 0));
+    END IF;
+  END IF;
+  FOR d IN SELECT * FROM jsonb_array_elements(p_deelnemers) LOOP
+    INSERT INTO public.klant_event_inschrijvingen
+      (event_id, client_id, ingeschreven_door_auth, ingeschreven_door_naam, naam, email, prijs_cents,
+       akkoord_factuur_op, akkoord_tekst, factuur_status)
+    VALUES
+      (p_event, p_client, p_door_auth, p_door_naam, d->>'naam', lower(d->>'email'), e.prijs_cents,
+       CASE WHEN e.prijs_cents > 0 THEN now() END, CASE WHEN e.prijs_cents > 0 THEN p_akkoord_tekst END,
+       CASE WHEN e.prijs_cents > 0 THEN 'te_factureren' ELSE 'geen' END)
+    RETURNING id INTO nieuw;
+    ids := ids || to_jsonb(nieuw);
+  END LOOP;
+  UPDATE public.klant_events SET inschrijving_versie = inschrijving_versie + 1, updated_at = now() WHERE id = p_event;
+  RETURN jsonb_build_object('ok', true, 'ids', ids);
+END
+$fn$;
+REVOKE ALL ON FUNCTION public.klant_event_inschrijven(uuid, uuid, uuid, text, jsonb, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.klant_event_inschrijven(uuid, uuid, uuid, text, jsonb, text) TO service_role;
+
+-- Uitschrijven: inschrijving en versie van de gastenlijst samen.
+CREATE OR REPLACE FUNCTION public.klant_event_uitschrijven(p_inschrijving uuid, p_door text)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE r public.klant_event_inschrijvingen%ROWTYPE;
+BEGIN
+  UPDATE public.klant_event_inschrijvingen
+     SET status = 'geannuleerd', geannuleerd_op = now(), geannuleerd_door = p_door,
+         factuur_status = CASE WHEN factuur_status = 'te_factureren' THEN 'geen' ELSE factuur_status END,
+         herinnering_status = CASE WHEN herinnering_status IN ('gepland', 'bezig') THEN 'overgeslagen' ELSE herinnering_status END,
+         updated_at = now()
+   WHERE id = p_inschrijving AND status = 'ingeschreven'
+  RETURNING * INTO r;
+  IF NOT FOUND THEN RETURN jsonb_build_object('fout', 'niet_actief'); END IF;
+  UPDATE public.klant_events SET inschrijving_versie = inschrijving_versie + 1, updated_at = now() WHERE id = r.event_id;
+  RETURN jsonb_build_object('ok', true, 'event_id', r.event_id);
+END
+$fn$;
+REVOKE ALL ON FUNCTION public.klant_event_uitschrijven(uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.klant_event_uitschrijven(uuid, text) TO service_role;
+
+-- Events: de bevestiging krijgt een eigen 'bezig' (een afgebroken poging pakt de scheduler na 10 minuten op).
+ALTER TABLE public.klant_event_inschrijvingen ADD COLUMN IF NOT EXISTS bevestiging_bezig_sinds timestamptz;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_event_inschr_bevestiging_check'
+             AND pg_get_constraintdef(oid) NOT LIKE '%bezig%') THEN
+    ALTER TABLE public.klant_event_inschrijvingen DROP CONSTRAINT klant_event_inschr_bevestiging_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_event_inschr_bevestiging_check') THEN
+    ALTER TABLE public.klant_event_inschrijvingen ADD CONSTRAINT klant_event_inschr_bevestiging_check CHECK (bevestiging_status IN ('nog_niet', 'bezig', 'verzonden', 'mislukt', 'overgeslagen'));
+  END IF;
+END $$;
+
+-- Content: staand formaat (reels/Shorts), ingesloten posts (Instagram, Facebook,
+-- LinkedIn, YouTube) als cover, en eigen labels naast de vaste keuzes.
+ALTER TABLE public.nieuwsbrieven ADD COLUMN IF NOT EXISTS categorie_label text;
+ALTER TABLE public.nieuwsbrieven ADD COLUMN IF NOT EXISTS cover_formaat text NOT NULL DEFAULT 'liggend';
+ALTER TABLE public.nieuwsbrieven ADD COLUMN IF NOT EXISTS cover_embed jsonb;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nieuwsbrieven_categorie_check' AND pg_get_constraintdef(oid) NOT LIKE '%andere%') THEN
+    ALTER TABLE public.nieuwsbrieven DROP CONSTRAINT nieuwsbrieven_categorie_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nieuwsbrieven_categorie_check') THEN
+    ALTER TABLE public.nieuwsbrieven ADD CONSTRAINT nieuwsbrieven_categorie_check CHECK (categorie IN ('projecten', 'klant_in_de_kijker', 'tips', 'nieuws', 'team', 'andere'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nieuwsbrieven_cover_formaat_check') THEN
+    ALTER TABLE public.nieuwsbrieven ADD CONSTRAINT nieuwsbrieven_cover_formaat_check CHECK (cover_formaat IN ('liggend', 'staand'));
+  END IF;
+END $$;
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS formaat text NOT NULL DEFAULT 'liggend';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'founders_videos_formaat_check') THEN
+    ALTER TABLE public.founders_videos ADD CONSTRAINT founders_videos_formaat_check CHECK (formaat IN ('liggend', 'staand'));
+  END IF;
+END $$;
+ALTER TABLE public.klant_events ADD COLUMN IF NOT EXISTS soort_label text;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_soort_check' AND pg_get_constraintdef(oid) NOT LIKE '%andere%') THEN
+    ALTER TABLE public.klant_events DROP CONSTRAINT klant_events_soort_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_soort_check') THEN
+    ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_soort_check CHECK (soort IN ('webinar', 'workshop', 'event', 'opleiding', 'andere'));
+  END IF;
+END $$;
+
+-- Team in de klantapp: wie staat bij Meeting boeken (meeting_zichtbaar), met
+-- welke agenda (leeg = de standaardagenda van klantboekingen), in welke volgorde.
+-- Een klantmeeting kan aan een gekozen teamlid hangen; de ClickUp-taak gaat naar
+-- diens ClickUp-gebruiker (clickup_toegewezen).
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS meeting_zichtbaar boolean NOT NULL DEFAULT false;
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS meeting_agenda_id uuid REFERENCES public.sales_calendar_connections(id) ON DELETE SET NULL;
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS klantapp_volgorde integer;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS teamlid_id uuid REFERENCES public.personeel(id) ON DELETE SET NULL;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS clickup_toegewezen bigint;
+
+-- Opdrachten als kanbanbord (1 nov 2026): bron (inbound/outbound), diensten
+-- (kleur van de kaart), hoe de offerte gedeeld werd, waarom iets stopte, en
+-- interne notities per kaart. De kolom zelf volgt uit de bestaande status.
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS bron text;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS diensten text[] NOT NULL DEFAULT '{}';
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS offerte_via text;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS offerte_op date;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS stop_reden text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'opdrachten_bron_check') THEN
+    ALTER TABLE public.opdrachten ADD CONSTRAINT opdrachten_bron_check CHECK (bron IS NULL OR bron IN ('inbound', 'outbound'));
+  END IF;
+END $$;
+CREATE TABLE IF NOT EXISTS public.opdracht_notities (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  opdracht_id     uuid NOT NULL REFERENCES public.opdrachten(id) ON DELETE CASCADE,
+  tekst           text NOT NULL CHECK (char_length(tekst) BETWEEN 1 AND 4000),
+  soort           text NOT NULL DEFAULT 'notitie' CHECK (soort IN ('notitie', 'systeem')),
+  auteur_user_id  uuid,
+  auteur_email    text,
+  auteur_naam     text,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS opdracht_notities_opdracht ON public.opdracht_notities (opdracht_id, created_at DESC);
+ALTER TABLE public.opdracht_notities ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.opdracht_notities FROM anon, authenticated;
+
+-- Founders of Flanders: een voorbeeld kan ook een social post zijn (Instagram,
+-- Facebook, LinkedIn). We bewaren enkel de nagekeken openbare link (EmbedRef).
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS embed jsonb;
+ALTER TABLE public.founders_videos ALTER COLUMN youtube_id DROP NOT NULL;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'founders_videos_bron_check') THEN
+    ALTER TABLE public.founders_videos ADD CONSTRAINT founders_videos_bron_check CHECK (youtube_id IS NOT NULL OR embed IS NOT NULL);
+  END IF;
+END $$;
+
+-- Dagelijkse planning Chiara: extra taken per klant, telkens die klant in een
+-- reeks zit (bv. Verheyen: meeting op het einde van de maand inplannen).
+-- [{ key, titel, reeks }]; afvinken per maand via cp_routine_checks (kt:<klant>:<taak>).
+ALTER TABLE public.cp_klanten ADD COLUMN IF NOT EXISTS extra_taken jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+-- Founders of Flanders: Instagram-video's spelen in de app met de eigen speler.
+-- Bij het bewaren haalt de server de miniatuur en de video één keer op (de
+-- links van Instagram vervallen) en zet ze in de publieke bucket founders-media.
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS media_poster_pad text;
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS media_video_pad text;
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS media_status text;
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS media_fout text;
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS media_opgehaald_op timestamptz;
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS media_bezig_sinds timestamptz;
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('founders-media', 'founders-media', true, 52428800, ARRAY['video/mp4', 'image/jpeg', 'image/webp', 'image/png'])
+ON CONFLICT (id) DO NOTHING;
+
+-- Video-opleveringen (1 nov 2026): losse video's en beeldmateriaal opleveren
+-- zonder WeTransfer. Versies (Eerste versie, Revisieronde 1 en 2, Finale
+-- versie), feedback met tijdcodes, twee revisierondes. Bestanden in de
+-- privébucket "opleveringen", rechtstreeks vanuit de browser opgeladen
+-- (hervatbaar), en na 3 dagen weggehaald door de scheduler.
+CREATE TABLE IF NOT EXISTS public.opleveringen (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id     uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  opdracht_id   uuid REFERENCES public.opdrachten(id) ON DELETE SET NULL,
+  titel         text NOT NULL CHECK (char_length(titel) BETWEEN 1 AND 200),
+  omschrijving  text,
+  max_revisies  integer NOT NULL DEFAULT 2 CHECK (max_revisies BETWEEN 0 AND 10),
+  gearchiveerd_op timestamptz,
+  aangemaakt_door text,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS opleveringen_klant ON public.opleveringen (client_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS public.oplevering_versies (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  oplevering_id   uuid NOT NULL REFERENCES public.opleveringen(id) ON DELETE CASCADE,
+  nummer          integer NOT NULL CHECK (nummer >= 1),
+  is_finaal       boolean NOT NULL DEFAULT false,
+  bericht         text,
+  gepubliceerd_op timestamptz,
+  gepubliceerd_door text,
+  verloopt_op     timestamptz,
+  verwijderd_op   timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (oplevering_id, nummer)
+);
+CREATE INDEX IF NOT EXISTS oplevering_versies_verloop ON public.oplevering_versies (verloopt_op) WHERE verwijderd_op IS NULL AND verloopt_op IS NOT NULL;
+CREATE TABLE IF NOT EXISTS public.oplevering_bestanden (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  oplevering_id   uuid NOT NULL REFERENCES public.opleveringen(id) ON DELETE CASCADE,
+  versie_id       uuid NOT NULL REFERENCES public.oplevering_versies(id) ON DELETE CASCADE,
+  pad             text NOT NULL UNIQUE,
+  poster_pad      text,
+  naam            text NOT NULL,
+  mimetype        text,
+  grootte         bigint NOT NULL DEFAULT 0,
+  duur            numeric,
+  breedte         integer,
+  hoogte          integer,
+  status          text NOT NULL DEFAULT 'upload' CHECK (status IN ('upload', 'klaar')),
+  volgorde        integer NOT NULL DEFAULT 0,
+  downloads       integer NOT NULL DEFAULT 0,
+  laatst_gedownload_op timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS oplevering_bestanden_versie ON public.oplevering_bestanden (versie_id, volgorde);
+CREATE TABLE IF NOT EXISTS public.oplevering_feedback (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  oplevering_id   uuid NOT NULL REFERENCES public.opleveringen(id) ON DELETE CASCADE,
+  versie_id       uuid NOT NULL REFERENCES public.oplevering_versies(id) ON DELETE CASCADE,
+  soort           text NOT NULL CHECK (soort IN ('revisie', 'goedkeuring', 'opmerking')),
+  ronde           integer,
+  tekst           text,
+  punten          jsonb NOT NULL DEFAULT '[]'::jsonb,
+  door_naam       text,
+  door_email      text,
+  door_user_id    uuid,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS oplevering_feedback_oplevering ON public.oplevering_feedback (oplevering_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS oplevering_feedback_ronde ON public.oplevering_feedback (oplevering_id, ronde) WHERE soort = 'revisie';
+CREATE UNIQUE INDEX IF NOT EXISTS oplevering_feedback_beslissing ON public.oplevering_feedback (versie_id) WHERE soort IN ('revisie', 'goedkeuring');
+ALTER TABLE public.opleveringen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.oplevering_versies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.oplevering_bestanden ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.oplevering_feedback ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.opleveringen, public.oplevering_versies, public.oplevering_bestanden, public.oplevering_feedback FROM anon, authenticated;
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('opleveringen', 'opleveringen', false, NULL, NULL)
+ON CONFLICT (id) DO NOTHING;
+
+-- ── Taken bij een opdracht (1 nov 2026) ─────────────────────────────────────
+-- Zoals sales_lead_taken: een gewone ClickUp-taak (deadline, geen agenda-item)
+-- in de lijst van NextGen Media of NextGen Solutions, toegewezen aan de
+-- verantwoordelijke, met een link naar de opdrachtkaart. Additief.
+CREATE TABLE IF NOT EXISTS public.opdracht_taken (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  opdracht_id uuid NOT NULL REFERENCES public.opdrachten(id) ON DELETE CASCADE,
+  aanvraag_sleutel text,
+  omschrijving text NOT NULL,
+  notitie text,
+  deadline date,
+  merk text NOT NULL,
+  clickup_list_id text,
+  clickup_assignee_id bigint,
+  clickup_assignee_naam text,
+  clickup_task_id text,
+  clickup_url text,
+  clickup_status text,
+  clickup_status_kleur text,
+  clickup_status_type text,
+  status_gelezen_op timestamptz,
+  sync_status text NOT NULL DEFAULT 'wacht',
+  sync_fout text,
+  created_by uuid,
+  created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS opdracht_taken_aanvraag ON public.opdracht_taken (aanvraag_sleutel) WHERE aanvraag_sleutel IS NOT NULL;
+CREATE INDEX IF NOT EXISTS opdracht_taken_opdracht ON public.opdracht_taken (opdracht_id, created_at DESC);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'opdracht_taken_merk_check') THEN
+    ALTER TABLE public.opdracht_taken ADD CONSTRAINT opdracht_taken_merk_check CHECK (merk IN ('nextgenmedia', 'nextgensolutions'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'opdracht_taken_sync_check') THEN
+    ALTER TABLE public.opdracht_taken ADD CONSTRAINT opdracht_taken_sync_check CHECK (sync_status IN ('wacht', 'ok', 'fout'));
+  END IF;
+END $$;
+ALTER TABLE public.opdracht_taken ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.opdracht_taken FROM anon, authenticated;
+
+-- ── Akkoord algemene voorwaarden en privacyverklaring bij ondertekenen (2 nov 2026)
+-- De klant vinkt beide aan bij elke ondertekening (de voorwaarden gelden ook
+-- voor toekomstige opdrachten). Bewijs per handtekening: tijdstip en wat er
+-- aanvaard werd (tekst, link, versie van de privacyverklaring). Additief.
+ALTER TABLE public.contract_signatures ADD COLUMN IF NOT EXISTS voorwaarden_akkoord_op timestamptz;
+ALTER TABLE public.contract_signatures ADD COLUMN IF NOT EXISTS privacy_akkoord_op timestamptz;
+ALTER TABLE public.contract_signatures ADD COLUMN IF NOT EXISTS akkoord_details jsonb;
+
+-- ── Projecten (2 nov 2026): één CRM voor leads en projecten ─────────────────
+-- Vanaf "Offerte gestuurd" zijn naam, btw-nummer en dienst verplicht. Het
+-- btw-nummer staat bij de klant (clients.btw_nummer); voor een prospect zonder
+-- klantdossier op de kaart zelf. Bedrijf: NextGenMedia, NextGenSolutions of
+-- Founders of Flanders. Datum: wanneer het project begon (voor de filters op
+-- maand, kwartaal en jaar). Elk contract heeft hoogstens één kaart.
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS btw_nummer text;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS merk text;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS datum date;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'opdrachten_merk_check') THEN
+    ALTER TABLE public.opdrachten ADD CONSTRAINT opdrachten_merk_check CHECK (merk IS NULL OR merk IN ('nextgenmedia', 'nextgensolutions', 'foundersofflanders'));
+  END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS opdrachten_contract_uniek ON public.opdrachten (contract_id) WHERE contract_id IS NOT NULL;
+
+-- Privébucket voor archieven (o.a. het Excel-archief van de oude verkooppipeline, 2 nov 2026).
+INSERT INTO storage.buckets (id, name, public) VALUES ('archief', 'archief', false) ON CONFLICT (id) DO NOTHING;
+
+-- Opslagverbruik van de app (databank + bestanden per bucket), voor Instellingen → Opslag (2 nov 2026).
+CREATE OR REPLACE FUNCTION public.opslag_verbruik()
+ RETURNS jsonb
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'storage'
+AS $function$
+  SELECT jsonb_build_object(
+    'databank_bytes', pg_database_size(current_database()),
+    'buckets', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object('bucket', bucket_id, 'bytes', bytes, 'bestanden', n) ORDER BY bytes DESC)
+      FROM (SELECT bucket_id, SUM(COALESCE((metadata->>'size')::bigint, 0)) AS bytes, COUNT(*) AS n FROM storage.objects GROUP BY bucket_id) b
+    ), '[]'::jsonb)
+  )
+$function$;
+REVOKE ALL ON FUNCTION public.opslag_verbruik() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.opslag_verbruik() TO service_role;
+
+-- Privébucket voor profielfoto's van interne accounts (Mijn account, 2 nov 2026).
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('accounts', 'accounts', false, 3145728, ARRAY['image/jpeg','image/png','image/webp'])
+ON CONFLICT (id) DO NOTHING;
+
+-- Nieuwsbrief per merk: huisstijl en afzender van de mail (2 nov 2026).
+ALTER TABLE public.nieuwsbrieven ADD COLUMN IF NOT EXISTS merk text NOT NULL DEFAULT 'nextgenmedia';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nieuwsbrieven_merk_check') THEN
+    ALTER TABLE public.nieuwsbrieven ADD CONSTRAINT nieuwsbrieven_merk_check CHECK (merk IN ('nextgenmedia','nextgensolutions'));
+  END IF;
+END $$;
+
+-- Contract: wanneer de klant het voor het eerst opende (niet als het team kijkt) (4 nov 2026).
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS klant_geopend_op timestamptz;
+
+-- Teamtaken: taken aan elkaar toewijzen vanuit het Command Center, gesynchroniseerd met ClickUp (4 nov 2026).
+CREATE TABLE IF NOT EXISTS public.team_taken (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bron text NOT NULL DEFAULT 'team',
+  client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  klant_naam text,
+  aanvraag_sleutel text,
+  omschrijving text NOT NULL,
+  notitie text,
+  deadline date,
+  merk text NOT NULL,
+  clickup_list_id text,
+  clickup_assignee_id bigint,
+  clickup_assignee_naam text,
+  clickup_task_id text,
+  clickup_url text,
+  clickup_status text,
+  clickup_status_kleur text,
+  clickup_status_type text,
+  status_gelezen_op timestamptz,
+  sync_status text NOT NULL DEFAULT 'wacht',
+  sync_fout text,
+  afgerond_op timestamptz,
+  created_by uuid,
+  created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS team_taken_aanvraag ON public.team_taken (aanvraag_sleutel) WHERE aanvraag_sleutel IS NOT NULL;
+CREATE INDEX IF NOT EXISTS team_taken_open ON public.team_taken (afgerond_op, deadline);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'team_taken_merk_check') THEN
+    ALTER TABLE public.team_taken ADD CONSTRAINT team_taken_merk_check CHECK (merk IN ('nextgenmedia', 'nextgensolutions'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'team_taken_sync_check') THEN
+    ALTER TABLE public.team_taken ADD CONSTRAINT team_taken_sync_check CHECK (sync_status IN ('wacht', 'ok', 'fout'));
+  END IF;
+END $$;
+ALTER TABLE public.team_taken ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.team_taken FROM anon, authenticated;
+ALTER TABLE public.opdracht_taken ADD COLUMN IF NOT EXISTS afgerond_op timestamptz;
+
+-- ── Offertes (4 nov 2026) ───────────────────────────────────────────────────
+-- Sjablonen (achterliggende pdf's, te vervangen als de prijzen wijzigen) en
+-- verstuurde offertes met een publieke link: de klant bekijkt en accepteert.
+-- Geopend telt enkel als de klant kijkt (zoals bij contracten).
+CREATE TABLE IF NOT EXISTS public.offerte_sjablonen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam text NOT NULL,
+  merk text NOT NULL DEFAULT 'nextgenmedia',
+  dienst text,
+  beschrijving text,
+  pdf_pad text NOT NULL,
+  pdf_naam text,
+  bytes bigint,
+  actief boolean NOT NULL DEFAULT true,
+  volgorde integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by_email text
+);
+CREATE TABLE IF NOT EXISTS public.offertes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  opdracht_id uuid REFERENCES public.opdrachten(id) ON DELETE SET NULL,
+  klant_naam text,
+  titel text NOT NULL,
+  bedrag_excl numeric(12,2),
+  merk text NOT NULL DEFAULT 'nextgenmedia',
+  sjabloon_id uuid REFERENCES public.offerte_sjablonen(id) ON DELETE SET NULL,
+  pdf_pad text NOT NULL,
+  pdf_naam text,
+  token text NOT NULL,
+  status text NOT NULL DEFAULT 'concept',
+  ontvanger_email text,
+  ontvanger_naam text,
+  geldig_tot date,
+  verstuurd_op timestamptz,
+  klant_geopend_op timestamptz,
+  laatst_geopend_op timestamptz,
+  aantal_keer_geopend integer NOT NULL DEFAULT 0,
+  geaccepteerd_op timestamptz,
+  geaccepteerd_door text,
+  geaccepteerd_ip text,
+  geaccepteerd_ua text,
+  ingetrokken_op timestamptz,
+  email_message_id uuid,
+  created_by uuid,
+  created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS offertes_token ON public.offertes (token);
+CREATE INDEX IF NOT EXISTS offertes_status ON public.offertes (status, verstuurd_op DESC);
+CREATE INDEX IF NOT EXISTS offertes_opdracht ON public.offertes (opdracht_id);
+CREATE INDEX IF NOT EXISTS offertes_klant ON public.offertes (client_id);
+CREATE TABLE IF NOT EXISTS public.offerte_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  offerte_id uuid NOT NULL REFERENCES public.offertes(id) ON DELETE CASCADE,
+  soort text NOT NULL,
+  meta jsonb,
+  ip text,
+  user_agent text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS offerte_events_offerte ON public.offerte_events (offerte_id, created_at DESC);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'offertes_status_check') THEN
+    ALTER TABLE public.offertes ADD CONSTRAINT offertes_status_check CHECK (status IN ('concept', 'verstuurd', 'geaccepteerd', 'ingetrokken'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'offertes_merk_check') THEN
+    ALTER TABLE public.offertes ADD CONSTRAINT offertes_merk_check CHECK (merk IN ('nextgenmedia', 'nextgensolutions'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'offerte_sjablonen_merk_check') THEN
+    ALTER TABLE public.offerte_sjablonen ADD CONSTRAINT offerte_sjablonen_merk_check CHECK (merk IN ('nextgenmedia', 'nextgensolutions'));
+  END IF;
+END $$;
+ALTER TABLE public.offerte_sjablonen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.offertes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.offerte_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.offerte_sjablonen, public.offertes, public.offerte_events FROM anon, authenticated;
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('offertes', 'offertes', false, 26214400, ARRAY['application/pdf'])
+ON CONFLICT (id) DO NOTHING;
+
+-- ── Facturatie (4 nov 2026): voorstel contractwaarde, bestelbon op maandreeksen ──
+-- Het voorstel wordt NOOIT de contractwaarde zonder bevestiging (contract_waarde_excl blijft leeg).
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_voorstel numeric(12,2);
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_voorstel_uitleg text;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_voorstel_bron text;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_voorstel_op timestamptz;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS klant_referentie text;
+
+-- ── Dagelijkse planning Chiara (4 nov 2026) ──────────────────────────────────
+-- Meetings inplannen: rijen zonder eigen socialmediadienst (INN, SLL, K, J), per sleutel en maand.
+CREATE TABLE IF NOT EXISTS public.cp_meeting_planning_extra (
+  sleutel text NOT NULL,
+  maand text NOT NULL,
+  status text NOT NULL CHECK (status IN ('nodig', 'niet_nodig', 'ingepland')),
+  door text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (sleutel, maand)
+);
+ALTER TABLE public.cp_meeting_planning_extra ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.cp_meeting_planning_extra FROM anon, authenticated;
+-- Aandachtspunten voor de contentkalender (cp_notities.soort = 'kalender'): geldig van maand tot tot_maand (leeg = altijd).
+ALTER TABLE public.cp_notities ADD COLUMN IF NOT EXISTS tot_maand text;
+
+-- ── Vesting: akkoord per contract (4 nov 2026) ───────────────────────────────
+-- Een contract dat de klant nog niet tekende kan al meetellen; de datum volgt bij ondertekening.
+ALTER TABLE public.vesting_contracten ALTER COLUMN ondertekend_op DROP NOT NULL;
+-- Directe kosten per contract (hosting, onderaanneming, advertentiebudget …). De som staat ook in uitgesloten_kosten.
+CREATE TABLE IF NOT EXISTS public.vesting_kosten (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  vesting_contract_id uuid NOT NULL REFERENCES public.vesting_contracten(id) ON DELETE CASCADE,
+  soort text NOT NULL DEFAULT 'andere' CHECK (soort IN ('hosting', 'onderaanneming', 'advertentiebudget', 'software', 'andere')),
+  omschrijving text,
+  bedrag numeric(12,2) NOT NULL CHECK (bedrag > 0),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by_email text
+);
+CREATE INDEX IF NOT EXISTS vesting_kosten_contract_idx ON public.vesting_kosten (vesting_contract_id);
+-- Bestaande kostenaftrek als één lijn, enkel waar er nog geen lijnen zijn (som blijft gelijk).
+INSERT INTO public.vesting_kosten (vesting_contract_id, soort, omschrijving, bedrag)
+SELECT c.id, 'andere', 'Kosten (vorige invoer)', c.uitgesloten_kosten
+FROM public.vesting_contracten c
+WHERE c.uitgesloten_kosten > 0
+  AND NOT EXISTS (SELECT 1 FROM public.vesting_kosten k WHERE k.vesting_contract_id = c.id);
+-- Handtekeningen: per vennoot, voor exact de cijfers in `inhoud_tekst`. Nooit bijwerken, enkel toevoegen.
+CREATE TABLE IF NOT EXISTS public.vesting_handtekeningen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  onderwerp text NOT NULL CHECK (onderwerp IN ('contract', 'kost')),
+  onderwerp_id uuid NOT NULL,
+  vennoot text NOT NULL CHECK (vennoot IN ('marco', 'bram', 'chiara')),
+  user_id uuid NOT NULL,
+  naam text,
+  email text,
+  inhoud jsonb NOT NULL,
+  inhoud_tekst text NOT NULL,
+  handtekening text NOT NULL,
+  getekend_op timestamptz NOT NULL DEFAULT now(),
+  ip text,
+  user_agent text
+);
+CREATE INDEX IF NOT EXISTS vesting_handtekeningen_onderwerp_idx ON public.vesting_handtekeningen (onderwerp, onderwerp_id);
+CREATE UNIQUE INDEX IF NOT EXISTS vesting_handtekeningen_uniek ON public.vesting_handtekeningen (onderwerp, onderwerp_id, vennoot, md5(inhoud_tekst));
+ALTER TABLE public.vesting_kosten ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vesting_handtekeningen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.vesting_kosten, public.vesting_handtekeningen FROM anon, authenticated;
+-- Wie welk account heeft (tekenen kan enkel met het eigen account).
+INSERT INTO public.app_settings (key, value, updated_at)
+SELECT 'vesting_vennoten', jsonb_build_object(
+  'marco', jsonb_build_object('naam', 'Marco Castermans', 'user_ids', COALESCE((SELECT jsonb_agg(id) FROM auth.users WHERE email = 'marco@nextgenmedia.be'), '[]'::jsonb)),
+  'bram', jsonb_build_object('naam', 'Bram Reinquin', 'user_ids', COALESCE((SELECT jsonb_agg(id) FROM auth.users WHERE email = 'bram@nextgenmedia.be'), '[]'::jsonb)),
+  'chiara', jsonb_build_object('naam', 'Chiara Walmagh', 'user_ids', COALESCE((SELECT jsonb_agg(id) FROM auth.users WHERE email = 'chiara@nextgenmedia.be'), '[]'::jsonb))
+), now()
+WHERE NOT EXISTS (SELECT 1 FROM public.app_settings WHERE key = 'vesting_vennoten');
+
+-- ── Vesting: inkomsten en kosten registreren (4 nov 2026) ────────────────────
+-- Inkomsten via een andere weg (bv. WAM wordt klant van de BV) en algemene kosten, altijd met verantwoording.
+-- Nooit verwijderen: schrappen (geschrapt_op) en ook daarvoor tekent iedereen.
+CREATE TABLE IF NOT EXISTS public.vesting_registraties (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  soort text NOT NULL CHECK (soort IN ('inkomst', 'kost')),
+  datum date NOT NULL DEFAULT current_date,
+  omschrijving text NOT NULL,
+  bedrag numeric(12,2) NOT NULL CHECK (bedrag > 0),
+  verantwoording text,
+  referentie text,
+  geschrapt_op timestamptz,
+  geschrapt_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by_email text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by_email text
+);
+CREATE INDEX IF NOT EXISTS vesting_registraties_soort_idx ON public.vesting_registraties (soort, datum);
+ALTER TABLE public.vesting_registraties ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.vesting_registraties FROM anon, authenticated;
+-- De algemene kosten (afsluiting WAM) worden registraties, met hetzelfde id.
+INSERT INTO public.vesting_registraties (id, soort, datum, omschrijving, bedrag, verantwoording, created_at)
+SELECT id, 'kost', COALESCE(datum, current_date), omschrijving, bedrag, 'Afsluiting van WAM, de vorige zaak van Marco. Overgenomen uit de vorige Vesting.', created_at
+FROM public.vesting_wam_kosten
+WHERE bedrag > 0
+ON CONFLICT (id) DO NOTHING;
+-- Kostenlijnen per contract krijgen een verantwoording.
+ALTER TABLE public.vesting_kosten ADD COLUMN IF NOT EXISTS verantwoording text;
+ALTER TABLE public.vesting_kosten ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+-- Handtekeningen ook voor inkomsten.
+ALTER TABLE public.vesting_handtekeningen DROP CONSTRAINT IF EXISTS vesting_handtekeningen_onderwerp_check;
+ALTER TABLE public.vesting_handtekeningen ADD CONSTRAINT vesting_handtekeningen_onderwerp_check CHECK (onderwerp IN ('contract', 'kost', 'inkomst'));
+-- Eenmalig (live, 4 nov 2026, op vraag): de oude WAM-portefeuille, -termijnen en -kosten zijn
+-- bewaard in vesting_wam_backup_20261104, vesting_wam_termijnen_backup_20261104 en
+-- vesting_wam_kosten_backup_20261104 en daarna leeggemaakt. WAM loopt nu via registraties.
+
+-- ── Vesting: bewijsstuk en certificaten (4 nov 2026) ─────────────────────────
+-- Privébucket voor bewijsstukken (contract, factuur) en certificaten.
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('vesting', 'vesting', false, 26214400, ARRAY['application/pdf', 'image/jpeg', 'image/png'])
+ON CONFLICT (id) DO NOTHING;
+ALTER TABLE public.vesting_registraties ADD COLUMN IF NOT EXISTS bewijs_pad text;
+ALTER TABLE public.vesting_registraties ADD COLUMN IF NOT EXISTS bewijs_naam text;
+ALTER TABLE public.vesting_registraties ADD COLUMN IF NOT EXISTS bewijs_sha256 text;
+ALTER TABLE public.vesting_registraties ADD COLUMN IF NOT EXISTS bewijs_grootte bigint;
+ALTER TABLE public.vesting_kosten ADD COLUMN IF NOT EXISTS bewijs_pad text;
+ALTER TABLE public.vesting_kosten ADD COLUMN IF NOT EXISTS bewijs_naam text;
+ALTER TABLE public.vesting_kosten ADD COLUMN IF NOT EXISTS bewijs_sha256 text;
+ALTER TABLE public.vesting_kosten ADD COLUMN IF NOT EXISTS bewijs_grootte bigint;
+-- Eén certificaat per versie die alle drie tekenden; de mail naar legal@ vertrekt één keer.
+CREATE TABLE IF NOT EXISTS public.vesting_certificaten (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nummer text NOT NULL UNIQUE,
+  onderwerp text NOT NULL CHECK (onderwerp IN ('contract', 'kost', 'inkomst')),
+  onderwerp_id uuid NOT NULL,
+  inhoud_tekst text NOT NULL,
+  inhoud jsonb NOT NULL,
+  aandeel numeric,
+  stand jsonb,
+  volledig_op timestamptz NOT NULL,
+  pdf_pad text,
+  pdf_sha256 text,
+  mail_naar text[],
+  mail_status text NOT NULL DEFAULT 'wacht' CHECK (mail_status IN ('wacht', 'verstuurd', 'mislukt')),
+  mail_fout text,
+  mail_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS vesting_certificaten_versie ON public.vesting_certificaten (onderwerp, onderwerp_id, md5(inhoud_tekst));
+ALTER TABLE public.vesting_certificaten ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.vesting_certificaten FROM anon, authenticated;
+
+-- ── Projecten ↔ offertes (4 nov 2026) ────────────────────────────────────────
+-- Kaart die de app maakte bij een offerte: valt weg als dat concept weggegooid wordt (en er niets anders aan hangt).
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS aangemaakt_door_offerte uuid;
+
+-- ── Contentkalender personaliseren (6 nov 2026) ──────────────────────────────
+-- Eigen labels per klant (enkel voor die kalender), labels op een post en eigen kleuren per fase.
+CREATE TABLE IF NOT EXISTS public.content_labels (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  naam text NOT NULL,
+  kleur text NOT NULL DEFAULT '#6b7280',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS content_labels_naam ON public.content_labels (client_id, lower(naam));
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS labels uuid[] NOT NULL DEFAULT '{}';
+CREATE TABLE IF NOT EXISTS public.content_kalender_stijl (
+  client_id uuid PRIMARY KEY REFERENCES public.clients(id) ON DELETE CASCADE,
+  fase_kleuren jsonb NOT NULL DEFAULT '{}'::jsonb,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text
+);
+ALTER TABLE public.content_labels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.content_kalender_stijl ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.content_labels, public.content_kalender_stijl FROM anon, authenticated;
+
+-- ── Aankopen: optionele link naar de bestelpagina (6 nov 2026) ─────────────
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS bestel_link text;
+
+-- ── Tegenhandtekening: NextGenMedia tekent na de klant (9 nov 2026) ─────────
+-- Zone voor onze handtekening (naast die van de klant) op contracten en templates,
+-- en wie wanneer namens ons tekende. Het door de klant getekende bestand blijft
+-- bewaard in klant_getekend_pdf_path; signed_pdf_path wordt de versie met beide.
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ons_sig_page integer;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ons_sig_x_pct numeric;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ons_sig_y_pct numeric;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ons_sig_width integer;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ons_sig_height integer;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS tegengetekend_op timestamptz;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS tegengetekend_door text;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS tegengetekend_door_email text;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS tegengetekend_user_id uuid;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS tegengetekend_bedrijf text;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS klant_getekend_pdf_path text;
+ALTER TABLE public.contract_templates ADD COLUMN IF NOT EXISTS ons_sig_page integer;
+ALTER TABLE public.contract_templates ADD COLUMN IF NOT EXISTS ons_sig_x_pct numeric;
+ALTER TABLE public.contract_templates ADD COLUMN IF NOT EXISTS ons_sig_y_pct numeric;
+ALTER TABLE public.contract_templates ADD COLUMN IF NOT EXISTS ons_sig_width integer;
+ALTER TABLE public.contract_templates ADD COLUMN IF NOT EXISTS ons_sig_height integer;
+CREATE INDEX IF NOT EXISTS contracts_tegentekenen ON public.contracts (signed_at) WHERE tegengetekend_op IS NULL;
+
+-- ── Uitgaven vennoten (9 nov 2026) ──────────────────────────────────────────
+-- Aankopen op de zaak met een persoonlijk voordeel voor één vennoot, met een
+-- maandbudget dat je opspaart. Regels + budget tekenen alle drie per versie.
+CREATE TABLE IF NOT EXISTS public.vennoot_uitgaven (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  vennoot text NOT NULL CHECK (vennoot IN ('marco', 'bram', 'chiara')),
+  datum date NOT NULL,
+  omschrijving text NOT NULL,
+  doel text,
+  bedrag numeric(12,2) NOT NULL CHECK (bedrag > 0),
+  bewijs_pad text,
+  bewijs_naam text,
+  gearchiveerd_op timestamptz,
+  gearchiveerd_door text,
+  archief_reden text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text,
+  updated_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS vennoot_uitgaven_vennoot_datum ON public.vennoot_uitgaven (vennoot, datum DESC);
+CREATE TABLE IF NOT EXISTS public.vennoot_regels (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  versie integer NOT NULL UNIQUE,
+  regels jsonb NOT NULL,
+  maandbudget numeric(10,2) NOT NULL DEFAULT 250,
+  start_maand text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text
+);
+CREATE TABLE IF NOT EXISTS public.vennoot_regels_handtekeningen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  regels_id uuid NOT NULL REFERENCES public.vennoot_regels(id) ON DELETE CASCADE,
+  vennoot text NOT NULL CHECK (vennoot IN ('marco', 'bram', 'chiara')),
+  user_id uuid NOT NULL,
+  naam text,
+  email text,
+  inhoud_tekst text NOT NULL,
+  handtekening text NOT NULL,
+  getekend_op timestamptz NOT NULL DEFAULT now(),
+  ip text,
+  user_agent text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS vennoot_regels_handtekeningen_uniek ON public.vennoot_regels_handtekeningen (regels_id, vennoot);
+ALTER TABLE public.vennoot_uitgaven ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vennoot_regels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vennoot_regels_handtekeningen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.vennoot_uitgaven, public.vennoot_regels, public.vennoot_regels_handtekeningen FROM anon, authenticated;
+-- Privébucket voor bonnetjes en facturen (foto of pdf).
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('vennoot-uitgaven', 'vennoot-uitgaven', false, 26214400, ARRAY['application/pdf', 'image/jpeg', 'image/png', 'image/heic', 'image/heif', 'image/webp'])
+ON CONFLICT (id) DO NOTHING;
+
+-- Opleveringen: ook ontwerp, foto's en documenten (9 nov 2026).
+alter table public.opleveringen add column if not exists soort text not null default 'video';
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'opleveringen_soort_check') then
+    alter table public.opleveringen add constraint opleveringen_soort_check check (soort in ('video','ontwerp','foto','document'));
+  end if;
+end $$;
+
+-- Offertes opmaken in de app (9 nov 2026): invulfiches, nummer, verantwoordelijke, akkoord met vinkjes en handtekening.
+alter table public.offertes add column if not exists bron text not null default 'pdf';
+alter table public.offertes add column if not exists inhoud jsonb;
+alter table public.offertes add column if not exists offertenummer text;
+alter table public.offertes add column if not exists verantwoordelijke text;
+alter table public.offertes add column if not exists getekend_pdf_pad text;
+alter table public.offertes add column if not exists handtekening_pad text;
+alter table public.offertes add column if not exists getekend_op timestamptz;
+alter table public.offertes add column if not exists voorwaarden_akkoord_op timestamptz;
+alter table public.offertes add column if not exists privacy_akkoord_op timestamptz;
+alter table public.offertes add column if not exists akkoord_details jsonb;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'offertes_bron_check') then
+    alter table public.offertes add constraint offertes_bron_check check (bron in ('pdf','opgemaakt'));
+  end if;
+end $$;
+create unique index if not exists offertes_offertenummer_uniek on public.offertes (upper(offertenummer)) where offertenummer is not null;
+
+-- Regels vesting (11 nov 2026): zelfde werking als de regels bij Uitgaven vennoten.
+create table if not exists public.vesting_regels (
+  id uuid primary key default gen_random_uuid(),
+  versie integer not null unique,
+  regels jsonb not null,
+  created_at timestamptz not null default now(),
+  created_by text
+);
+create table if not exists public.vesting_regels_handtekeningen (
+  id uuid primary key default gen_random_uuid(),
+  regels_id uuid not null references public.vesting_regels(id) on delete restrict,
+  vennoot text not null,
+  user_id uuid not null,
+  naam text,
+  email text,
+  inhoud_tekst text not null,
+  handtekening text not null,
+  getekend_op timestamptz not null default now(),
+  ip text,
+  user_agent text
+);
+create unique index if not exists vesting_regels_handtekeningen_uniek on public.vesting_regels_handtekeningen (regels_id, vennoot);
+alter table public.vesting_regels enable row level security;
+alter table public.vesting_regels_handtekeningen enable row level security;
+
+-- Op getekend zetten via een bestelbon (12 nov 2026): het nummer gaat mee naar elke factuur van het contract.
+alter table public.contracts add column if not exists bestelbon_nummer text;
+alter table public.contracts add column if not exists ondertekening_via text;
+-- Offerte zelf op aanvaard zetten (mail, papier of bestelbon); het bestelbonnummer gaat mee naar het contract.
+alter table public.offertes add column if not exists bestelbon_nummer text;
+alter table public.offertes add column if not exists aanvaard_via text;
+-- Vesting: soort lead per contract (Google Ads 100%, website 50%, inbound met Bram als closer 25%).
+alter table public.vesting_contracten add column if not exists lead_soort text;
+-- Uitgaven vennoten: akkoord van Marco, Bram en Chiara per uitgave, op exact die cijfers.
+create table if not exists public.vennoot_uitgave_akkoorden (
+  id uuid primary key default gen_random_uuid(),
+  uitgave_id uuid not null references public.vennoot_uitgaven(id) on delete cascade,
+  vennoot text not null,
+  user_id uuid not null,
+  naam text,
+  inhoud_tekst text not null,
+  akkoord_op timestamptz not null default now(),
+  ip text,
+  user_agent text
+);
+create unique index if not exists vennoot_uitgave_akkoorden_uniek on public.vennoot_uitgave_akkoorden (uitgave_id, vennoot, md5(inhoud_tekst));
+create index if not exists vennoot_uitgave_akkoorden_uitgave on public.vennoot_uitgave_akkoorden (uitgave_id);
+alter table public.vennoot_uitgave_akkoorden enable row level security;
+-- Klantaccount activeren (12 nov 2026): persoonlijke link (7 dagen) om zelf een wachtwoord te kiezen. Enkel de SHA-256 van de token.
+create table if not exists public.klant_activaties (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references public.clients(id) on delete cascade,
+  user_id uuid not null,
+  email text not null,
+  token_hash text not null unique,
+  verloopt_op timestamptz not null,
+  geopend_op timestamptz,
+  gebruikt_op timestamptz,
+  created_at timestamptz not null default now(),
+  created_by text
+);
+create index if not exists klant_activaties_user on public.klant_activaties (user_id);
+alter table public.klant_activaties enable row level security;
+-- Projecten: Account-based marketing (12 nov 2026). Bedrijven waar we gericht achter gaan, geïmporteerd uit csv of xlsx.
+create table if not exists public.abm_bedrijven (
+  id uuid primary key default gen_random_uuid(),
+  naam text not null,
+  btw_nummer text,
+  telefoon text,
+  email text,
+  website text,
+  contactpersoon text,
+  functie text,
+  gemeente text,
+  sector text,
+  notitie text,
+  client_id uuid references public.clients(id) on delete set null,
+  opdracht_id uuid references public.opdrachten(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  created_by text
+);
+create index if not exists abm_bedrijven_naam on public.abm_bedrijven (lower(naam));
+alter table public.abm_bedrijven enable row level security;
+
+-- Mail-opvolging (15 nov 2026): mails van en naar klanten (enkel wie we kennen), meetings uit de agenda, afgehandelde opvolgingen.
+create table if not exists public.mail_berichten (
+  id uuid primary key default gen_random_uuid(),
+  message_id text not null,
+  mailbox text not null,
+  map text not null,
+  uid bigint,
+  richting text not null check (richting in ('in','uit')),
+  van text,
+  aan text[] not null default '{}',
+  onderwerp text,
+  verzonden_op timestamptz not null,
+  in_reply_to text,
+  tegenpartij text,
+  client_id uuid references public.clients(id) on delete set null,
+  opdracht_id uuid references public.opdrachten(id) on delete set null,
+  fragment text,
+  ai_soort text,
+  ai_samenvatting text,
+  ai_op timestamptz,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists mail_berichten_message_id on public.mail_berichten (message_id);
+create index if not exists mail_berichten_client on public.mail_berichten (client_id, verzonden_op desc);
+create index if not exists mail_berichten_opdracht on public.mail_berichten (opdracht_id, verzonden_op desc);
+alter table public.mail_berichten enable row level security;
+create table if not exists public.mail_sync_status (
+  mailbox text not null,
+  map text not null,
+  pad text,
+  uidvalidity bigint,
+  laatste_uid bigint,
+  laatst_gelezen_op timestamptz,
+  aantal_bewaard integer not null default 0,
+  fout text,
+  primary key (mailbox, map)
+);
+alter table public.mail_sync_status enable row level security;
+create table if not exists public.opvolg_meetings (
+  id uuid primary key default gen_random_uuid(),
+  bron text not null default 'google',
+  event_id text not null,
+  agenda text,
+  titel text,
+  start timestamptz not null,
+  eind timestamptz not null,
+  genodigde text,
+  client_id uuid references public.clients(id) on delete set null,
+  opdracht_id uuid references public.opdrachten(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists opvolg_meetings_event on public.opvolg_meetings (bron, event_id);
+alter table public.opvolg_meetings enable row level security;
+create table if not exists public.mail_opvolging_afgehandeld (
+  id uuid primary key default gen_random_uuid(),
+  opdracht_id uuid not null references public.opdrachten(id) on delete cascade,
+  sleutel text not null,
+  reden text,
+  door text,
+  op timestamptz not null default now()
+);
+create unique index if not exists mail_opvolging_afgehandeld_uniek on public.mail_opvolging_afgehandeld (opdracht_id, sleutel);
+alter table public.mail_opvolging_afgehandeld enable row level security;
+-- Taken uit de mail (15 nov 2026): wat we beloofden of wat de klant vroeg; voorstel → Zet taak (ClickUp) of Verwijder.
+create table if not exists public.mail_taken (
+  id uuid primary key default gen_random_uuid(),
+  mail_id uuid references public.mail_berichten(id) on delete cascade,
+  message_id text not null,
+  client_id uuid references public.clients(id) on delete set null,
+  opdracht_id uuid references public.opdrachten(id) on delete set null,
+  wat text not null,
+  deadline date,
+  citaat text,
+  wie text not null default 'wij',
+  status text not null default 'voorstel',
+  taak_soort text,
+  taak_id uuid,
+  clickup_task_id text,
+  clickup_url text,
+  clickup_naam text,
+  clickup_status_type text,
+  reden text,
+  beslist_door text,
+  beslist_op timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists mail_taken_uniek on public.mail_taken (message_id, md5(lower(wat)));
+create index if not exists mail_taken_status on public.mail_taken (status, created_at desc);
+alter table public.mail_taken enable row level security;
+
+-- ── Vesting: klant vroeger gestopt met een vastgelegd meetellend bedrag (15 nov 2026) ──
+-- Het bedrag dat effectief meetelt voor Marco, met een beschrijving; enkel bij status stopgezet.
+-- lead_soort mag nu ook 'outbound' zijn (aangeduid); leeg = nog niet aangeduid.
+alter table public.vesting_contracten add column if not exists meetellend_vast numeric;
+alter table public.vesting_contracten add column if not exists meetellend_uitleg text;
+
+-- ── Account-based marketing: geen interesse (15 nov 2026) ──
+-- Bedrijf uit de kolom, in het vuilbakje "Geen interesse" (terugzetten kan). Niets wordt verwijderd.
+alter table public.abm_bedrijven add column if not exists geen_interesse_op timestamptz;
+alter table public.abm_bedrijven add column if not exists geen_interesse_door text;
+
+-- ── Contentkalender: kleur per type (post, reel, story, carrousel) (16 nov 2026) ──
+-- Leeg = standaardkleur per type. Klant en team zien dezelfde kleuren.
+alter table public.content_kalender_stijl add column if not exists type_kleuren jsonb not null default '{}'::jsonb;
+
+-- ── Contentkalender: eigen namen en kleuren per type en kanaal, kleur van de vakjes (16 nov 2026) ──
+-- Leeg = standaardnaam/-kleur; blok_kleur null = Status (of Type als er typekleuren zijn).
+alter table public.content_kalender_stijl add column if not exists type_namen jsonb not null default '{}'::jsonb;
+alter table public.content_kalender_stijl add column if not exists kanaal_kleuren jsonb not null default '{}'::jsonb;
+alter table public.content_kalender_stijl add column if not exists kanaal_namen jsonb not null default '{}'::jsonb;
+alter table public.content_kalender_stijl add column if not exists blok_kleur text;
+alter table public.content_kalender_stijl add column if not exists een_kleur text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'content_kalender_stijl_blok_kleur_check') THEN
+    ALTER TABLE public.content_kalender_stijl ADD CONSTRAINT content_kalender_stijl_blok_kleur_check
+      CHECK (blok_kleur IS NULL OR blok_kleur IN ('status','type','kanaal','label','een'));
+  END IF;
+END $$;
+-- ── Algemene contracten: eigen contracten van NextGenMedia met e-sign (17 nov 2026) ──
+-- Huurovereenkomsten, verzekeringen, commissieregelingen, NDA's … in mappen met labels.
+-- Een opgeladen PDF tekenen wij en eventueel de andere partij (persoonlijke link per mail).
+CREATE TABLE IF NOT EXISTS public.algemene_contract_mappen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam text NOT NULL,
+  volgorde integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS algemene_contract_mappen_naam ON public.algemene_contract_mappen (lower(naam));
+INSERT INTO public.algemene_contract_mappen (naam, volgorde)
+SELECT v.naam, v.volgorde FROM (VALUES ('Huurovereenkomsten', 1), ('Verzekeringen', 2), ('Commissieregelingen', 3), ('Partnerships', 4), ('NDA''s', 5), ('Andere', 99)) AS v(naam, volgorde)
+WHERE NOT EXISTS (SELECT 1 FROM public.algemene_contract_mappen m WHERE lower(m.naam) = lower(v.naam));
+
+CREATE TABLE IF NOT EXISTS public.algemene_contracten (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  map_id uuid REFERENCES public.algemene_contract_mappen(id) ON DELETE SET NULL,
+  titel text NOT NULL,
+  tegenpartij text,
+  tegenpartij_email text,
+  labels text[] NOT NULL DEFAULT '{}',
+  notitie text,
+  begin_datum date,
+  eind_datum date,
+  bestand_pad text NOT NULL,
+  bestand_naam text,
+  bestand_grootte bigint,
+  bestand_sha256 text,
+  paginas integer,
+  huidig_pad text,
+  huidig_sha256 text,
+  versie integer NOT NULL DEFAULT 1,
+  ons_nodig boolean NOT NULL DEFAULT true,
+  ondertekenaar text,
+  ons_zone jsonb,
+  ons_getekend_op timestamptz,
+  ons_getekend_door text,
+  ons_getekend_email text,
+  ons_user_id uuid,
+  partij_nodig boolean NOT NULL DEFAULT false,
+  partij_zone jsonb,
+  partij_getekend_op timestamptz,
+  partij_naam text,
+  partij_email text,
+  partij_ip text,
+  partij_ua text,
+  partij_geopend_op timestamptz,
+  laatst_verstuurd_op timestamptz,
+  gearchiveerd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text,
+  created_by_user uuid,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS algemene_contracten_map ON public.algemene_contracten (map_id);
+CREATE INDEX IF NOT EXISTS algemene_contracten_open ON public.algemene_contracten (ons_nodig, ons_getekend_op) WHERE gearchiveerd_op IS NULL;
+
+-- Persoonlijke links voor de andere partij: enkel de SHA-256 van de link, één per verzonden mail.
+CREATE TABLE IF NOT EXISTS public.algemene_contract_links (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.algemene_contracten(id) ON DELETE CASCADE,
+  token_hash text NOT NULL UNIQUE,
+  email text,
+  verloopt_op timestamptz NOT NULL,
+  geopend_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text
+);
+CREATE INDEX IF NOT EXISTS algemene_contract_links_contract ON public.algemene_contract_links (contract_id);
+
+-- Tijdlijn: opgeladen, getekend (door wie, van waar), verstuurd, geopend, aangepast.
+CREATE TABLE IF NOT EXISTS public.algemene_contract_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.algemene_contracten(id) ON DELETE CASCADE,
+  actie text NOT NULL,
+  door text,
+  details jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS algemene_contract_events_contract ON public.algemene_contract_events (contract_id, created_at DESC);
+
+ALTER TABLE public.algemene_contract_mappen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.algemene_contracten ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.algemene_contract_links ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.algemene_contract_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.algemene_contract_mappen, public.algemene_contracten, public.algemene_contract_links, public.algemene_contract_events FROM anon, authenticated;
+
+-- Privébucket voor de PDF's (origineel, getekende versies, handtekeningen), max 50 MB.
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('algemene-contracten', 'algemene-contracten', false, 52428800, ARRAY['application/pdf', 'image/png'])
+ON CONFLICT (id) DO NOTHING;
+
+-- ── Algemene contracten: submappen (17 nov 2026) ──
+-- Mappen in mappen (parent_id); dezelfde naam mag in een andere map.
+ALTER TABLE public.algemene_contract_mappen ADD COLUMN IF NOT EXISTS parent_id uuid REFERENCES public.algemene_contract_mappen(id) ON DELETE SET NULL;
+DROP INDEX IF EXISTS public.algemene_contract_mappen_naam;
+CREATE UNIQUE INDEX IF NOT EXISTS algemene_contract_mappen_naam_ouder ON public.algemene_contract_mappen (coalesce(parent_id, '00000000-0000-0000-0000-000000000000'::uuid), lower(naam));
+
+-- ── Nieuwe projecten uit de mail (19 nov 2026) ──
+-- De AI leest inkomende mails en stelt streng voor wat een nieuw project lijkt; een mens kiest Ja (projectkaart) of Nee.
+create table if not exists public.mail_projecten (
+  id uuid primary key default gen_random_uuid(),
+  message_id text not null,
+  mailbox text not null,
+  van text,
+  van_naam text,
+  onderwerp text,
+  onderwerp_sleutel text,
+  ontvangen_op timestamptz not null,
+  formulier boolean not null default false,
+  client_id uuid references public.clients(id) on delete set null,
+  lopende_opdracht_id uuid references public.opdrachten(id) on delete set null,
+  opdracht_id uuid references public.opdrachten(id) on delete set null,
+  status text not null default 'voorstel' check (status in ('voorstel','ja','nee','al_op_bord')),
+  zekerheid numeric,
+  reden text,
+  titel text,
+  samenvatting text,
+  project text,
+  diensten text[] not null default '{}',
+  ads text,
+  contact jsonb not null default '{}'::jsonb,
+  email text,
+  beslist_door text,
+  beslist_op timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists mail_projecten_message_id on public.mail_projecten (message_id);
+create index if not exists mail_projecten_status on public.mail_projecten (status, ontvangen_op desc);
+create index if not exists mail_projecten_van on public.mail_projecten (van, ontvangen_op desc);
+alter table public.mail_projecten enable row level security;
+-- Bladwijzer per mailbox voor deze leesronde (los van de gewone mail-opvolging).
+create table if not exists public.mail_project_scan (
+  mailbox text primary key,
+  uidvalidity bigint,
+  laatste_uid bigint,
+  laatst_gelezen_op timestamptz,
+  beoordeeld integer not null default 0,
+  fout text
+);
+alter table public.mail_project_scan enable row level security;
+
+-- ── Shoot planner (20 nov 2026) ──
+-- Eén plek voor shoots: shoot_briefings (per klant, ook zichtbaar in de klantapp)
+-- krijgt een volledig shootplan. shoot_date/start_time/end_time/location blijven
+-- gevuld (afgeleid uit het programma), zodat klantfiche, klantapp en het
+-- bestaande shootdocument gewoon blijven werken.
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS titel text;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'gepland';
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS doel text;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS locaties jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS programma jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS betrokkenen jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS paklijst jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS shotlist jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS praktisch text;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS briefing_pad text;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS briefing_naam text;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS briefing_type text;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS versie integer NOT NULL DEFAULT 1;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS bijgewerkt_door text;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS laatst_verstuurd_op timestamptz;
+CREATE INDEX IF NOT EXISTS shoot_briefings_datum ON public.shoot_briefings (shoot_date);
+
+-- Persoonlijke link naar het shootplan (/shoot/<token>): één per ontvanger per mail, enkel de SHA-256.
+CREATE TABLE IF NOT EXISTS public.shoot_links (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  shoot_id uuid NOT NULL REFERENCES public.shoot_briefings(id) ON DELETE CASCADE,
+  token_hash text NOT NULL UNIQUE,
+  email text,
+  naam text,
+  verloopt_op timestamptz NOT NULL,
+  geopend_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text
+);
+CREATE INDEX IF NOT EXISTS shoot_links_shoot ON public.shoot_links (shoot_id);
+ALTER TABLE public.shoot_links ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.shoot_links FROM anon, authenticated;
+
+-- Privébucket voor briefingdocumenten (pdf, foto, Word, tekst), max 25 MB.
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('shoots', 'shoots', false, 26214400, ARRAY['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'])
+ON CONFLICT (id) DO NOTHING;
+
+-- ── Uitgaven vennoten: extra budget en terugkerende uitgaven (22 nov 2026) ──
+-- Extra budget: één beslissing voor één, twee of alle drie de vennoten, voor één maand,
+-- met een onderbouwing. Telt pas mee als alle drie akkoord gaven (op exact die tekst).
+create table if not exists public.vennoot_budget_extra (
+  id uuid primary key default gen_random_uuid(),
+  vennoten text[] not null,
+  maand text not null,
+  bedrag numeric(12,2) not null,
+  reden text not null,
+  gearchiveerd_op timestamptz,
+  gearchiveerd_door text,
+  archief_reden text,
+  created_at timestamptz not null default now(),
+  created_by text,
+  updated_at timestamptz
+);
+create index if not exists vennoot_budget_extra_maand on public.vennoot_budget_extra (maand);
+alter table public.vennoot_budget_extra enable row level security;
+create table if not exists public.vennoot_budget_extra_akkoorden (
+  id uuid primary key default gen_random_uuid(),
+  extra_id uuid not null references public.vennoot_budget_extra(id) on delete cascade,
+  vennoot text not null,
+  user_id uuid not null,
+  naam text,
+  inhoud_tekst text not null,
+  akkoord_op timestamptz not null default now(),
+  ip text,
+  user_agent text
+);
+create unique index if not exists vennoot_budget_extra_akkoorden_uniek on public.vennoot_budget_extra_akkoorden (extra_id, vennoot, md5(inhoud_tekst));
+alter table public.vennoot_budget_extra_akkoorden enable row level security;
+-- Terugkerende uitgave (lease, huur, abonnement): elke maand, elk kwartaal of elk jaar vanaf start_datum,
+-- tot eind_datum (leeg = loopt door). Elke betaling tot vandaag telt mee; akkoord één keer op de afspraak.
+create table if not exists public.vennoot_terugkerend (
+  id uuid primary key default gen_random_uuid(),
+  vennoot text not null,
+  omschrijving text not null,
+  doel text,
+  bedrag numeric(12,2) not null,
+  frequentie text not null,
+  start_datum date not null,
+  eind_datum date,
+  bewijs_pad text,
+  bewijs_naam text,
+  gearchiveerd_op timestamptz,
+  gearchiveerd_door text,
+  archief_reden text,
+  created_at timestamptz not null default now(),
+  created_by text,
+  updated_at timestamptz
+);
+alter table public.vennoot_terugkerend enable row level security;
+create table if not exists public.vennoot_terugkerend_akkoorden (
+  id uuid primary key default gen_random_uuid(),
+  terugkerend_id uuid not null references public.vennoot_terugkerend(id) on delete cascade,
+  vennoot text not null,
+  user_id uuid not null,
+  naam text,
+  inhoud_tekst text not null,
+  akkoord_op timestamptz not null default now(),
+  ip text,
+  user_agent text
+);
+create unique index if not exists vennoot_terugkerend_akkoorden_uniek on public.vennoot_terugkerend_akkoorden (terugkerend_id, vennoot, md5(inhoud_tekst));
+alter table public.vennoot_terugkerend_akkoorden enable row level security;
+revoke all on public.vennoot_budget_extra, public.vennoot_budget_extra_akkoorden, public.vennoot_terugkerend, public.vennoot_terugkerend_akkoorden from anon, authenticated;
+
+-- Uitgaven vennoten: één bonnetje verdeeld over meerdere vennoten (22 nov 2026).
+-- Leeg = de hele uitgave is van `vennoot`; anders {"bram": 25, "chiara": 25}.
+alter table public.vennoot_uitgaven add column if not exists verdeling jsonb;
+
+-- Materiaalbeheer: alles over een toestel, ook uit de factuur gelezen (22 nov 2026).
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS omschrijving text;   -- wat het is
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS inhoud text[];       -- wat erbij zit (batterij, lader …)
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS kenmerken text[];    -- belangrijkste specificaties
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS leverancier text;
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS factuurnummer text;
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS garantie_tot date;
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS factuur_pad text;    -- privébucket documenten, materiaal/facturen/…
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS factuur_naam text;
+
+-- ── NextGenSolutions: eigen pipeline en cijfers (22 nov 2026) ───────────────
+-- Los van de rest van de app (geen klanten, projecten of facturen): deals van
+-- NextGen Solutions van afspraak tot closed won/lost, met notities en
+-- opvolgtaken die naar ClickUp gaan (lijst van NextGen Solutions). Additief.
+CREATE TABLE IF NOT EXISTS public.ngs_deals (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bedrijf text NOT NULL,
+  contactpersoon text, email text, telefoon text,
+  titel text,
+  diensten text[] NOT NULL DEFAULT '{}',
+  fase text NOT NULL DEFAULT 'afspraak',
+  fase_sinds timestamptz NOT NULL DEFAULT now(),
+  afspraak_op timestamptz,
+  waarde_eenmalig numeric(12,2),
+  waarde_maandelijks numeric(12,2),
+  looptijd_maanden integer,
+  start_datum date,
+  bron text,
+  verantwoordelijke text,
+  gewonnen_op date, verloren_op date, verloren_reden text,
+  verwijderd_op timestamptz, verwijderd_door text,
+  created_by text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ngs_deals_fase_check') THEN
+    ALTER TABLE public.ngs_deals ADD CONSTRAINT ngs_deals_fase_check CHECK (fase IN ('afspraak', 'voorstel', 'opvolgen', 'won', 'lost'));
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS ngs_deals_fase ON public.ngs_deals (fase) WHERE verwijderd_op IS NULL;
+
+CREATE TABLE IF NOT EXISTS public.ngs_deal_notities (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id uuid NOT NULL REFERENCES public.ngs_deals(id) ON DELETE CASCADE,
+  tekst text NOT NULL,
+  soort text NOT NULL DEFAULT 'notitie',
+  door text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ngs_deal_notities_deal ON public.ngs_deal_notities (deal_id, created_at DESC);
+
+-- Opvolgtaken: zelfde vorm als opdracht_taken (één server: lib/sales/lead-taken-server.ts).
+CREATE TABLE IF NOT EXISTS public.ngs_deal_taken (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id uuid NOT NULL REFERENCES public.ngs_deals(id) ON DELETE CASCADE,
+  aanvraag_sleutel text,
+  omschrijving text NOT NULL,
+  notitie text,
+  deadline date,
+  merk text NOT NULL,
+  clickup_list_id text, clickup_assignee_id bigint, clickup_assignee_naam text,
+  clickup_task_id text, clickup_url text, clickup_status text, clickup_status_kleur text, clickup_status_type text,
+  status_gelezen_op timestamptz,
+  sync_status text NOT NULL DEFAULT 'wacht', sync_fout text,
+  created_by uuid, created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  afgerond_op timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ngs_deal_taken_aanvraag ON public.ngs_deal_taken (aanvraag_sleutel) WHERE aanvraag_sleutel IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ngs_deal_taken_deal ON public.ngs_deal_taken (deal_id, created_at DESC);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ngs_deal_taken_merk_check') THEN
+    ALTER TABLE public.ngs_deal_taken ADD CONSTRAINT ngs_deal_taken_merk_check CHECK (merk IN ('nextgenmedia', 'nextgensolutions'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ngs_deal_taken_sync_check') THEN
+    ALTER TABLE public.ngs_deal_taken ADD CONSTRAINT ngs_deal_taken_sync_check CHECK (sync_status IN ('wacht', 'ok', 'fout'));
+  END IF;
+END $$;
+ALTER TABLE public.ngs_deals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ngs_deal_notities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ngs_deal_taken ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.ngs_deals FROM anon, authenticated;
+REVOKE ALL ON public.ngs_deal_notities FROM anon, authenticated;
+REVOKE ALL ON public.ngs_deal_taken FROM anon, authenticated;
+
+-- ── Op te volgen: taak bij een regel (22 nov 2026) ─────────────────────────
+-- Een teamtaak die vanuit een regel in "Op te volgen" gemaakt werd ("contracten:<id>"),
+-- zodat de regel haar taak en datum terugvindt.
+ALTER TABLE IF EXISTS public.team_taken ADD COLUMN IF NOT EXISTS opvolg_ref text;
+CREATE INDEX IF NOT EXISTS team_taken_opvolg_ref_idx ON public.team_taken (opvolg_ref) WHERE opvolg_ref IS NOT NULL;
+
+-- ── Kilometervergoeding: de ritten achter de kilometerregel (23 nov 2026) ───
+-- { ritten: [{ van, naar, km, berekend, heenEnTerug, keer, datum }], tarief, btw, waarvoor }
+ALTER TABLE IF EXISTS public.invoices ADD COLUMN IF NOT EXISTS km_ritten jsonb;
+
+-- ── Vesting: WAM-contracten terug als eigen kaart + schrappen na handtekeningen (23 nov 2026) ──
+-- Een WAM-contract tekenen Marco, Bram en Chiara net als een contract of inkomst
+-- (onderwerp 'wam'). Wat door alle drie getekend werd, verwijder je niet maar
+-- schrap je (geschrapt_op): dat tekenen ze opnieuw.
+DO $$ BEGIN
+  IF to_regclass('public.vesting_handtekeningen') IS NOT NULL THEN
+    ALTER TABLE public.vesting_handtekeningen DROP CONSTRAINT IF EXISTS vesting_handtekeningen_onderwerp_check;
+    ALTER TABLE public.vesting_handtekeningen ADD CONSTRAINT vesting_handtekeningen_onderwerp_check CHECK (onderwerp = ANY (ARRAY['contract'::text, 'kost'::text, 'inkomst'::text, 'wam'::text]));
+  END IF;
+  IF to_regclass('public.vesting_certificaten') IS NOT NULL THEN
+    ALTER TABLE public.vesting_certificaten DROP CONSTRAINT IF EXISTS vesting_certificaten_onderwerp_check;
+    ALTER TABLE public.vesting_certificaten ADD CONSTRAINT vesting_certificaten_onderwerp_check CHECK (onderwerp = ANY (ARRAY['contract'::text, 'kost'::text, 'inkomst'::text, 'wam'::text]));
+  END IF;
+END $$;
+ALTER TABLE IF EXISTS public.vesting_wam ADD COLUMN IF NOT EXISTS geschrapt_op timestamptz;
+ALTER TABLE IF EXISTS public.vesting_wam ADD COLUMN IF NOT EXISTS geschrapt_door text;
+ALTER TABLE IF EXISTS public.vesting_contracten ADD COLUMN IF NOT EXISTS geschrapt_op timestamptz;
+ALTER TABLE IF EXISTS public.vesting_contracten ADD COLUMN IF NOT EXISTS geschrapt_door text;
+
+-- ── Metricool-statistieken voor de klantapp (23 nov 2026) ─────────────────────
+-- De sync (lib/metricool-stats-server.ts, via /api/cron/metricool-stats) haalt
+-- per merk dagcijfers per netwerk en de recente posts op; de klantapp leest
+-- enkel hieruit. Enkel de service role (geen policies).
+CREATE TABLE IF NOT EXISTS public.metricool_statistieken (
+  blog_id text NOT NULL,
+  netwerk text NOT NULL,
+  kpi text NOT NULL,
+  datum date NOT NULL,
+  waarde numeric NOT NULL,
+  bijgewerkt_op timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (blog_id, netwerk, kpi, datum)
+);
+CREATE TABLE IF NOT EXISTS public.metricool_posts (
+  blog_id text NOT NULL,
+  netwerk text NOT NULL,
+  post_id text NOT NULL,
+  gepubliceerd_op timestamptz,
+  soort text,
+  tekst text,
+  link text,
+  beeld text,
+  metrics jsonb NOT NULL DEFAULT '{}'::jsonb,
+  bijgewerkt_op timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (blog_id, netwerk, post_id)
+);
+CREATE INDEX IF NOT EXISTS metricool_posts_datum ON public.metricool_posts (blog_id, gepubliceerd_op DESC);
+CREATE TABLE IF NOT EXISTS public.metricool_sync (
+  blog_id text PRIMARY KEY,
+  laatst_op timestamptz,
+  volledig_op timestamptz,
+  bronnen jsonb NOT NULL DEFAULT '{}'::jsonb,
+  netwerken text[] NOT NULL DEFAULT '{}',
+  fouten jsonb NOT NULL DEFAULT '[]'::jsonb,
+  bezig_sinds timestamptz
+);
+ALTER TABLE public.metricool_statistieken ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.metricool_posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.metricool_sync ENABLE ROW LEVEL SECURITY;
+-- Elke 10 minuten één merk bijwerken (wat ouder is dan 6 uur), met het geheim van de scheduler.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') AND NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'metricool-statistieken') THEN
+    PERFORM cron.schedule('metricool-statistieken', '*/10 * * * *', $job$ SELECT net.http_post( url := 'https://app.nextgenmedia.be/api/cron/metricool-stats', headers := jsonb_build_object( 'Content-Type', 'application/json', 'x-sync-secret', (SELECT waarde FROM public.cron_geheimen WHERE sleutel = 'klantmeetings') ), body := '{}'::jsonb, timeout_milliseconds := 58000 ); $job$);
+  END IF;
+END $$;
+
+-- ── Agenda (25 nov 2026): ClickUp in de app. Spaces → mappen → lijsten → taken en meetings, docs, labels.
+-- Enkel de server leest en schrijft (service role); RLS staat aan zonder policies.
+CREATE TABLE IF NOT EXISTS public.ag_personen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid UNIQUE,
+  clickup_id bigint UNIQUE,
+  naam text NOT NULL,
+  email text,
+  kleur text,
+  actief boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.ag_spaces (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  clickup_id text UNIQUE,
+  naam text NOT NULL,
+  kleur text,
+  prive boolean NOT NULL DEFAULT false,
+  volgorde double precision NOT NULL DEFAULT 0,
+  verwijderd_op timestamptz,
+  verwijderd_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.ag_mappen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  space_id uuid NOT NULL REFERENCES public.ag_spaces(id) ON DELETE CASCADE,
+  parent_id uuid REFERENCES public.ag_mappen(id) ON DELETE CASCADE,
+  clickup_id text UNIQUE,
+  naam text NOT NULL,
+  kleur text,
+  client_id uuid,
+  prive boolean NOT NULL DEFAULT false,
+  volgorde double precision NOT NULL DEFAULT 0,
+  verwijderd_op timestamptz,
+  verwijderd_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ag_mappen_space ON public.ag_mappen (space_id);
+CREATE TABLE IF NOT EXISTS public.ag_lijsten (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  space_id uuid NOT NULL REFERENCES public.ag_spaces(id) ON DELETE CASCADE,
+  map_id uuid REFERENCES public.ag_mappen(id) ON DELETE CASCADE,
+  clickup_id text UNIQUE,
+  naam text NOT NULL,
+  kleur text,
+  client_id uuid,
+  prive boolean NOT NULL DEFAULT false,
+  statussen jsonb NOT NULL DEFAULT '[]'::jsonb,
+  volgorde double precision NOT NULL DEFAULT 0,
+  verwijderd_op timestamptz,
+  verwijderd_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ag_lijsten_space ON public.ag_lijsten (space_id);
+CREATE INDEX IF NOT EXISTS ag_lijsten_map ON public.ag_lijsten (map_id);
+-- Leden van een privé space, map of lijst (zoals in ClickUp).
+CREATE TABLE IF NOT EXISTS public.ag_leden (
+  soort text NOT NULL CHECK (soort IN ('space', 'map', 'lijst')),
+  doel_id uuid NOT NULL,
+  persoon_id uuid NOT NULL REFERENCES public.ag_personen(id) ON DELETE CASCADE,
+  PRIMARY KEY (soort, doel_id, persoon_id)
+);
+CREATE TABLE IF NOT EXISTS public.ag_labels (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam text NOT NULL,
+  kleur text NOT NULL DEFAULT '#6e6e6e',
+  volgorde double precision NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ag_labels_naam ON public.ag_labels (lower(naam));
+CREATE TABLE IF NOT EXISTS public.ag_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lijst_id uuid REFERENCES public.ag_lijsten(id) ON DELETE SET NULL,
+  parent_id uuid REFERENCES public.ag_items(id) ON DELETE CASCADE,
+  clickup_id text UNIQUE,
+  soort text NOT NULL DEFAULT 'taak' CHECK (soort IN ('taak', 'meeting')),
+  titel text NOT NULL,
+  beschrijving text,
+  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'klaar')),
+  clickup_status text,
+  clickup_status_kleur text,
+  urgent boolean NOT NULL DEFAULT false,
+  prioriteit smallint,
+  start_op timestamptz,
+  eind_op timestamptz,
+  heel_dag boolean NOT NULL DEFAULT false,
+  client_id uuid,
+  labels uuid[] NOT NULL DEFAULT '{}',
+  kleur text,
+  locatie text,
+  meet_url text,
+  velden jsonb,
+  prive boolean NOT NULL DEFAULT false,
+  eigenaar_id uuid REFERENCES public.ag_personen(id) ON DELETE SET NULL,
+  afgerond_op timestamptz,
+  afgerond_door text,
+  clickup_url text,
+  clickup_bijgewerkt_op timestamptz,
+  in_app_gewijzigd_op timestamptz,
+  verwijderd_op timestamptz,
+  verwijderd_door text,
+  volgorde double precision NOT NULL DEFAULT 0,
+  gemaakt_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ag_items_eind ON public.ag_items (eind_op) WHERE verwijderd_op IS NULL;
+CREATE INDEX IF NOT EXISTS ag_items_start ON public.ag_items (start_op) WHERE verwijderd_op IS NULL;
+CREATE INDEX IF NOT EXISTS ag_items_lijst ON public.ag_items (lijst_id);
+CREATE INDEX IF NOT EXISTS ag_items_parent ON public.ag_items (parent_id);
+CREATE INDEX IF NOT EXISTS ag_items_afgerond ON public.ag_items (afgerond_op DESC) WHERE status = 'klaar';
+CREATE TABLE IF NOT EXISTS public.ag_toegewezen (
+  item_id uuid NOT NULL REFERENCES public.ag_items(id) ON DELETE CASCADE,
+  persoon_id uuid NOT NULL REFERENCES public.ag_personen(id) ON DELETE CASCADE,
+  PRIMARY KEY (item_id, persoon_id)
+);
+CREATE INDEX IF NOT EXISTS ag_toegewezen_persoon ON public.ag_toegewezen (persoon_id);
+CREATE TABLE IF NOT EXISTS public.ag_docs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  space_id uuid REFERENCES public.ag_spaces(id) ON DELETE CASCADE,
+  map_id uuid REFERENCES public.ag_mappen(id) ON DELETE CASCADE,
+  lijst_id uuid REFERENCES public.ag_lijsten(id) ON DELETE CASCADE,
+  clickup_id text UNIQUE,
+  titel text NOT NULL,
+  inhoud text NOT NULL DEFAULT '',
+  prive boolean NOT NULL DEFAULT false,
+  eigenaar_id uuid REFERENCES public.ag_personen(id) ON DELETE SET NULL,
+  bijgewerkt_door text,
+  verwijderd_op timestamptz,
+  verwijderd_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+-- Wie mag mijn privéagenda zien.
+CREATE TABLE IF NOT EXISTS public.ag_delen (
+  eigenaar_id uuid NOT NULL REFERENCES public.ag_personen(id) ON DELETE CASCADE,
+  kijker_id uuid NOT NULL REFERENCES public.ag_personen(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (eigenaar_id, kijker_id)
+);
+CREATE TABLE IF NOT EXISTS public.ag_klant_kleuren (
+  client_id uuid PRIMARY KEY,
+  kleur text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+-- Meetinguitnodigingen uit de mail (Teams, Zoom, Meet): enkel een voorstel tot iemand op Inplannen klikt.
+CREATE TABLE IF NOT EXISTS public.ag_mail_voorstellen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  mailbox text NOT NULL,
+  message_id text NOT NULL UNIQUE,
+  van text,
+  van_naam text,
+  onderwerp text,
+  ontvangen_op timestamptz,
+  titel text NOT NULL,
+  start_op timestamptz,
+  eind_op timestamptz,
+  locatie text,
+  meet_url text,
+  platform text,
+  deelnemers jsonb NOT NULL DEFAULT '[]'::jsonb,
+  beschrijving text,
+  bron text NOT NULL DEFAULT 'ics',
+  status text NOT NULL DEFAULT 'voorstel' CHECK (status IN ('voorstel', 'ingepland', 'genegeerd')),
+  item_id uuid REFERENCES public.ag_items(id) ON DELETE SET NULL,
+  beslist_door text,
+  beslist_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ag_mail_voorstellen_status ON public.ag_mail_voorstellen (status, start_op);
+CREATE TABLE IF NOT EXISTS public.ag_mail_scan (
+  mailbox text PRIMARY KEY,
+  uidvalidity bigint,
+  laatste_uid bigint,
+  laatst_gelezen_op timestamptz,
+  fout text
+);
+-- ClickUp-bronnen voor de import: het gedeelde account (token uit de omgeving, token = NULL)
+-- en persoonlijke tokens, zodat ook ieders privélijsten meekomen. Het token verlaat de server nooit.
+CREATE TABLE IF NOT EXISTS public.ag_clickup_bronnen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sleutel text NOT NULL UNIQUE,
+  persoon_id uuid REFERENCES public.ag_personen(id) ON DELETE SET NULL,
+  token text,
+  clickup_user_id bigint,
+  clickup_naam text,
+  actief boolean NOT NULL DEFAULT true,
+  fase text NOT NULL DEFAULT 'structuur',
+  cursor jsonb NOT NULL DEFAULT '{}'::jsonb,
+  volledig_op timestamptz,
+  laatste_sync_op timestamptz,
+  bezig_sinds timestamptz,
+  tellers jsonb NOT NULL DEFAULT '{}'::jsonb,
+  fout text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.ag_personen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_spaces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_mappen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_lijsten ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_leden ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_labels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_toegewezen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_docs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_delen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_klant_kleuren ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_mail_voorstellen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_mail_scan ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_clickup_bronnen ENABLE ROW LEVEL SECURITY;
+-- Standaardlabels (aanpasbaar in de instellingen van de agenda).
+INSERT INTO public.ag_labels (naam, kleur, volgorde) VALUES
+  ('Shoot', '#f59e0b', 1), ('Lead', '#3b82f6', 2), ('Klantmeeting', '#10b981', 3),
+  ('Teamvergadering', '#8b5cf6', 4), ('Algemene vergadering', '#64748b', 5)
+ON CONFLICT DO NOTHING;
+ALTER TABLE public.ag_items ADD COLUMN IF NOT EXISTS clickup_parent_id text;
+ALTER TABLE public.ag_items ADD COLUMN IF NOT EXISTS clickup_lijst_id text;
+ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS clickup_parent_id text;
+ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS clickup_parent_type text;
+ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS clickup_bijgewerkt_op timestamptz;
+ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS in_app_gewijzigd_op timestamptz;
+CREATE INDEX IF NOT EXISTS ag_items_clickup_parent ON public.ag_items (clickup_parent_id) WHERE clickup_parent_id IS NOT NULL AND parent_id IS NULL;
+CREATE INDEX IF NOT EXISTS ag_items_clickup_lijst ON public.ag_items (clickup_lijst_id) WHERE lijst_id IS NULL;
+-- Na de ClickUp-import: subtaken aan hun taak, taken aan hun lijst, docs aan hun plaats.
+CREATE OR REPLACE FUNCTION public.ag_koppel_ouders() RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE o int; l int; d int;
+BEGIN
+  UPDATE public.ag_items c SET parent_id = p.id
+    FROM public.ag_items p
+    WHERE c.parent_id IS NULL AND c.clickup_parent_id IS NOT NULL AND c.clickup_parent_id = p.clickup_id AND p.id <> c.id;
+  GET DIAGNOSTICS o = ROW_COUNT;
+  UPDATE public.ag_items i SET lijst_id = li.id
+    FROM public.ag_lijsten li
+    WHERE i.lijst_id IS NULL AND i.clickup_lijst_id IS NOT NULL AND i.clickup_lijst_id = li.clickup_id;
+  GET DIAGNOSTICS l = ROW_COUNT;
+  UPDATE public.ag_docs x SET
+      space_id = CASE WHEN x.clickup_parent_type = 'space' THEN (SELECT id FROM public.ag_spaces WHERE clickup_id = x.clickup_parent_id) ELSE x.space_id END,
+      map_id = CASE WHEN x.clickup_parent_type = 'map' THEN (SELECT id FROM public.ag_mappen WHERE clickup_id = x.clickup_parent_id) ELSE x.map_id END,
+      lijst_id = CASE WHEN x.clickup_parent_type = 'lijst' THEN (SELECT id FROM public.ag_lijsten WHERE clickup_id = x.clickup_parent_id) ELSE x.lijst_id END
+    WHERE x.clickup_parent_id IS NOT NULL AND x.space_id IS NULL AND x.map_id IS NULL AND x.lijst_id IS NULL;
+  GET DIAGNOSTICS d = ROW_COUNT;
+  RETURN jsonb_build_object('ouders', o, 'lijsten', l, 'docs', d);
+END $$;
+REVOKE ALL ON FUNCTION public.ag_koppel_ouders() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ag_koppel_ouders() TO service_role;
+
+-- Agenda: uitnodigingen uit de mail (wijziging of annulering van dezelfde meeting herkennen via de UID uit het agendabestand).
+ALTER TABLE public.ag_mail_voorstellen ADD COLUMN IF NOT EXISTS ics_uid text;
+ALTER TABLE public.ag_mail_voorstellen ADD COLUMN IF NOT EXISTS geannuleerd boolean NOT NULL DEFAULT false;
+ALTER TABLE public.ag_mail_voorstellen ADD COLUMN IF NOT EXISTS vervangt_item_id uuid REFERENCES public.ag_items(id) ON DELETE SET NULL;
+ALTER TABLE public.ag_mail_voorstellen ADD COLUMN IF NOT EXISTS organisator jsonb;
+CREATE INDEX IF NOT EXISTS ag_mail_voorstellen_uid_idx ON public.ag_mail_voorstellen (ics_uid) WHERE ics_uid IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ag_mail_voorstellen_status_idx ON public.ag_mail_voorstellen (status, start_op);
+
+-- Agenda: een privé-doc ziet de eigenaar plus wie hier staat (Delen in het doc).
+ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS kijkers uuid[] NOT NULL DEFAULT '{}';
+
+-- Agenda: verantwoordelijke per space, docs bij een taak, bijlagen bij een taak (privébucket agenda, 50 MB).
+ALTER TABLE public.ag_spaces ADD COLUMN IF NOT EXISTS verantwoordelijke_id uuid REFERENCES public.ag_personen(id) ON DELETE SET NULL;
+ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS item_id uuid REFERENCES public.ag_items(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS ag_docs_item_idx ON public.ag_docs (item_id) WHERE item_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS public.ag_bijlagen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id uuid NOT NULL REFERENCES public.ag_items(id) ON DELETE CASCADE,
+  pad text NOT NULL,
+  naam text NOT NULL,
+  type text,
+  grootte bigint,
+  persoon_id uuid REFERENCES public.ag_personen(id) ON DELETE SET NULL,
+  geupload_door text,
+  verwijderd_op timestamptz,
+  verwijderd_door text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ag_bijlagen_item_idx ON public.ag_bijlagen (item_id);
+ALTER TABLE public.ag_bijlagen ENABLE ROW LEVEL SECURITY;
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('agenda', 'agenda', false, 52428800)
+ON CONFLICT (id) DO NOTHING;
+
+-- Agenda: deadline per taak (25 nov 2026). Een taak uit ClickUp met een einduur en zonder start krijgt die als deadline.
+ALTER TABLE public.ag_items ADD COLUMN IF NOT EXISTS deadline_op timestamptz;
+CREATE INDEX IF NOT EXISTS ag_items_deadline_idx ON public.ag_items (deadline_op) WHERE deadline_op IS NOT NULL AND verwijderd_op IS NULL;
+
+-- Agenda: opgemaakte documenten (25 nov 2026). De opmaak als TipTap-JSON; `inhoud` blijft de gewone tekst (zoeken, ClickUp).
+ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS inhoud_json jsonb;
+
+-- Agenda ronde 4 (25 nov 2026): privé en plaats vastzetten tegen de ClickUp-import, categorielabels, meetings afvinken.
+ALTER TABLE public.ag_spaces ADD COLUMN IF NOT EXISTS leden_vast boolean NOT NULL DEFAULT false;
+ALTER TABLE public.ag_mappen ADD COLUMN IF NOT EXISTS leden_vast boolean NOT NULL DEFAULT false;
+ALTER TABLE public.ag_lijsten ADD COLUMN IF NOT EXISTS leden_vast boolean NOT NULL DEFAULT false;
+ALTER TABLE public.ag_mappen ADD COLUMN IF NOT EXISTS plaats_vast boolean NOT NULL DEFAULT false;
+ALTER TABLE public.ag_lijsten ADD COLUMN IF NOT EXISTS plaats_vast boolean NOT NULL DEFAULT false;
+ALTER TABLE public.ag_labels ADD COLUMN IF NOT EXISTS categorie boolean NOT NULL DEFAULT false;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS afgevinkt_op timestamptz;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS afgevinkt_door text;
+CREATE OR REPLACE FUNCTION public.ag_label_erbij(p_label uuid, p_ids uuid[])
+RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path TO 'public' AS $$
+  WITH u AS (
+    UPDATE public.ag_items SET labels = array_append(coalesce(labels, '{}'), p_label)
+    WHERE id = ANY(p_ids) AND NOT (p_label = ANY(coalesce(labels, '{}')))
+    RETURNING 1
+  ) SELECT count(*)::int FROM u
+$$;
+REVOKE ALL ON FUNCTION public.ag_label_erbij(uuid, uuid[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ag_label_erbij(uuid, uuid[]) TO service_role;
+
+-- Agenda: opgemaakte beschrijving van een taak (26 nov 2026). De tekst (beschrijving, markdown) blijft; de opmaak staat hier.
+alter table public.ag_items add column if not exists beschrijving_json jsonb;
+
+-- Account-based marketing: opvolgen en notities per bedrijf (26 nov 2026).
+alter table public.abm_bedrijven add column if not exists opvolgen_op date;
+create table if not exists public.abm_notities (
+  id uuid primary key default gen_random_uuid(),
+  abm_id uuid not null references public.abm_bedrijven(id) on delete cascade,
+  soort text not null default 'notitie',
+  uitkomst text,
+  telefoon text,
+  tekst text,
+  door text,
+  created_at timestamptz not null default now()
+);
+create index if not exists abm_notities_abm on public.abm_notities (abm_id, created_at desc);
+alter table public.abm_notities enable row level security;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Verbeterplan fase 1 (26 nov 2026): bedrijf en dienstencatalogus als basis.
+-- Enkel toevoegend: nieuwe tabellen en nullable kolommen. De backfill schrijft
+-- enkel in de nieuwe kolommen (waar ze nog leeg zijn) en zet updated_at-triggers
+-- even uit, zodat bestaande gegevens en tijdstempels niet veranderen. Wat niet
+-- zeker is, komt in te_classificeren. Terugdraaien: supabase/terugdraaien/fase1.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.bedrijven (
+  slug text primary key,
+  naam text not null,
+  handelsnaam text,
+  kort text,
+  kleur text,
+  volgorde int not null default 0,
+  actief boolean not null default true,
+  created_at timestamptz not null default now()
+);
+alter table public.bedrijven enable row level security;
+insert into public.bedrijven (slug, naam, handelsnaam, kort, kleur, volgorde) values
+  ('nextgenmedia', 'NextGen Media', 'NextGenMedia', 'Media', '#0F0F0F', 1),
+  ('nextgensolutions', 'NextGen Solutions', 'NextGenSolutions', 'Solutions', '#3B82F6', 2),
+  ('algemeen', 'Algemeen', 'NextGen Agency BV', 'Algemeen', '#6B7280', 3)
+on conflict (slug) do nothing;
+
+create table if not exists public.diensten_catalogus (
+  slug text primary key,
+  naam text not null,
+  bedrijf text not null references public.bedrijven(slug),
+  parent_slug text references public.diensten_catalogus(slug),
+  omschrijving text,
+  inbegrepen text[] not null default '{}',
+  niet_inbegrepen text[] not null default '{}',
+  eenheid text not null default 'eenmalig',
+  terugkerend boolean not null default false,
+  actief boolean not null default true,
+  volgorde int not null default 0,
+  kleur text,
+  min_prijs numeric,
+  min_marge_pct numeric,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'diensten_catalogus_eenheid_check') then
+    alter table public.diensten_catalogus add constraint diensten_catalogus_eenheid_check check (eenheid in ('eenmalig', 'maand', 'uur'));
+  end if;
+end $$;
+alter table public.diensten_catalogus enable row level security;
+insert into public.diensten_catalogus (slug, naam, bedrijf, parent_slug, omschrijving, eenheid, terugkerend, volgorde, kleur) values
+  ('branding', 'Branding', 'nextgenmedia', null, 'Logo, huisstijl en (re)branding.', 'eenmalig', false, 10, '#FDE0DE'),
+  ('social_media', 'Social media', 'nextgenmedia', null, 'Planning, content en beheer van de kanalen.', 'maand', true, 20, '#FFF5C2'),
+  ('marketingstrategie', 'Marketingstrategie & consultancy', 'nextgenmedia', null, 'Richting, plan en advies voor de marketing.', 'uur', false, 30, '#F0E4D6'),
+  ('websites', 'Websites', 'nextgenmedia', null, 'Nieuwe website, redesign, webshop of landingspagina.', 'eenmalig', false, 40, '#ECE2FB'),
+  ('ads', 'Google & Meta Ads', 'nextgenmedia', null, 'Advertenties op Google, Meta, LinkedIn of TikTok.', 'maand', true, 50, '#D6F4EF'),
+  ('foto_video', 'Foto & video', 'nextgenmedia', null, 'Reels, bedrijfsvideo''s, shoots en fotografie.', 'eenmalig', false, 60, '#DCF3E2'),
+  ('ai_automatisatie', 'AI-automatisatie', 'nextgensolutions', null, 'Repetitief werk automatiseren met AI en koppelingen.', 'eenmalig', false, 110, '#DDEBFC'),
+  ('software_op_maat', 'Software op maat', 'nextgensolutions', null, 'Interne tools en software op maat van het bedrijf.', 'eenmalig', false, 120, '#E3E8FD'),
+  ('care', 'Care', 'nextgensolutions', null, 'Maandelijks onderhoud van de automatisaties en software.', 'maand', true, 130, '#E6F0FB')
+on conflict (slug) do nothing;
+insert into public.diensten_catalogus (slug, naam, bedrijf, parent_slug, omschrijving, eenheid, terugkerend, volgorde, kleur) values
+  ('grafisch_ontwerp', 'Grafisch ontwerp', 'nextgenmedia', 'branding', 'Flyers, brochures, visuals, banners en drukwerk.', 'eenmalig', false, 11, '#FDE0DE'),
+  ('emailmarketing', 'E-mailmarketing', 'nextgenmedia', 'marketingstrategie', 'Nieuwsbrieven, campagnes en automatische mails.', 'eenmalig', false, 31, '#F0E4D6'),
+  ('seo', 'SEO', 'nextgenmedia', 'websites', 'Beter gevonden worden in Google.', 'maand', true, 41, '#ECE2FB'),
+  ('website_onderhoud', 'Website-onderhoud', 'nextgenmedia', 'websites', 'Onderhoud en kleine aanpassingen aan de website.', 'maand', true, 42, '#ECE2FB')
+on conflict (slug) do nothing;
+
+-- Oude waarden → catalogus. De oude waarde blijft altijd staan waar ze stond.
+create table if not exists public.dienst_mapping (
+  bron text not null,
+  oude_waarde text not null,
+  dienst_slug text references public.diensten_catalogus(slug),
+  dienst_zeker boolean not null default false,
+  bedrijf text references public.bedrijven(slug),
+  bedrijf_zeker boolean not null default false,
+  opmerking text,
+  primary key (bron, oude_waarde)
+);
+alter table public.dienst_mapping enable row level security;
+insert into public.dienst_mapping (bron, oude_waarde, dienst_slug, dienst_zeker, bedrijf, bedrijf_zeker, opmerking) values
+  ('service_slug', 'social-media', 'social_media', true, 'nextgenmedia', true, null),
+  ('service_slug', 'webdesign', 'websites', true, 'nextgenmedia', true, null),
+  ('service_slug', 'foto-video', 'foto_video', true, 'nextgenmedia', true, null),
+  ('service_slug', 'grafisch-ontwerp', 'grafisch_ontwerp', true, 'nextgenmedia', true, null),
+  ('service_slug', 'marketing-consultancy', 'marketingstrategie', true, 'nextgenmedia', true, null),
+  ('service_slug', 'ads', 'ads', true, 'nextgenmedia', true, null),
+  ('opdracht', 'social_media', 'social_media', true, 'nextgenmedia', true, null),
+  ('opdracht', 'webdesign', 'websites', true, 'nextgenmedia', true, null),
+  ('opdracht', 'foto_video', 'foto_video', true, 'nextgenmedia', true, null),
+  ('opdracht', 'grafisch', 'grafisch_ontwerp', true, 'nextgenmedia', true, null),
+  ('opdracht', 'branding', 'grafisch_ontwerp', true, 'nextgenmedia', true, null),
+  ('opdracht', 'advertising', 'ads', true, 'nextgenmedia', true, null),
+  ('opdracht', 'meta_ads', 'ads', true, 'nextgenmedia', true, null),
+  ('opdracht', 'google_ads', 'ads', true, 'nextgenmedia', true, null),
+  ('opdracht', 'E-mailmarketing', 'emailmarketing', true, 'nextgenmedia', true, null),
+  ('opdracht', 'consultancy', 'marketingstrategie', false, 'nextgenmedia', false, 'Consultancy kan marketing of bedrijfsprocessen zijn.'),
+  ('opdracht', 'ngs', 'ai_automatisatie', false, 'nextgensolutions', true, 'Solutions is zeker, de dienst niet (AI, software op maat of Care).'),
+  ('opdracht', 'Performance marketing', 'ads', false, 'nextgenmedia', true, 'Performance marketing is meestal advertenties.'),
+  ('opdracht', 'founders', 'foto_video', false, 'nextgenmedia', false, 'Founders of Flanders: open vraag.'),
+  ('aanvraag_dienst', 'social_media', 'social_media', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'foto_video', 'foto_video', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'content_shoot', 'foto_video', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'grafisch', 'grafisch_ontwerp', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'branding', 'grafisch_ontwerp', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'website', 'websites', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'seo', 'seo', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'sea', 'ads', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'email', 'emailmarketing', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'ai', 'ai_automatisatie', true, 'nextgensolutions', true, null),
+  ('aanvraag_dienst', 'strategie', 'marketingstrategie', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'strategie', 'marketingstrategie', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'performance_scan', 'ads', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'ads_scan', 'ads', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'website_conversie_scan', 'websites', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'seo_scan', 'seo', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'social_content_strategie', 'social_media', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'klantreis_positionering', 'marketingstrategie', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'leadgen_funnel', 'marketingstrategie', false, 'nextgenmedia', false, 'Kan marketing of salesproces zijn.'),
+  ('aanvraag_consultancy', 'ai_workshop', 'ai_automatisatie', false, 'nextgensolutions', true, null),
+  ('aanvraag_consultancy', 'ai_scan', 'ai_automatisatie', false, 'nextgensolutions', true, null),
+  ('aanvraag_consultancy', 'workflow_scan', 'ai_automatisatie', false, 'nextgensolutions', true, null),
+  ('aanvraag_consultancy', 'sales_ops_scan', 'software_op_maat', false, 'nextgensolutions', true, null),
+  ('aanvraag_consultancy', 'crm_advies', 'software_op_maat', false, 'nextgensolutions', true, null),
+  ('aanvraag_founders', 'founder_video', 'foto_video', false, 'nextgenmedia', false, 'Founders of Flanders: open vraag.'),
+  ('oplevering', 'video', 'foto_video', true, 'nextgenmedia', true, null),
+  ('oplevering', 'fotos', 'foto_video', true, 'nextgenmedia', true, null),
+  ('oplevering', 'grafisch', 'grafisch_ontwerp', true, 'nextgenmedia', true, null)
+on conflict (bron, oude_waarde) do nothing;
+
+-- Wachtrij voor de zaakvoerders: records zonder zeker bedrijf of dienst.
+create table if not exists public.te_classificeren (
+  id uuid primary key default gen_random_uuid(),
+  tabel text not null,
+  rij_id text not null,
+  veld text not null,
+  voorstel text,
+  reden text,
+  aangemaakt_op timestamptz not null default now(),
+  opgelost_op timestamptz,
+  opgelost_door uuid,
+  opgelost_door_naam text,
+  keuze text,
+  unique (tabel, rij_id, veld)
+);
+create index if not exists te_classificeren_open on public.te_classificeren (tabel, aangemaakt_op) where opgelost_op is null;
+alter table public.te_classificeren enable row level security;
+
+-- Nieuwe kolommen (nullable): bedrijf en dienst.
+alter table public.opdrachten add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.opdrachten add column if not exists dienst_slugs text[];
+alter table public.offertes add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.offertes add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.contracts add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.contracts add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.invoices add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.invoices add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.invoice_lines add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.invoice_lines add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.recurring_invoices add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.recurring_invoices add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.purchases add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.cost_entries add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.invoice_costs add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.team_taken add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.klant_meetings add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.shoot_briefings add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.shoot_briefings add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.opleveringen add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.opleveringen add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.klant_aanvragen add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.klant_aanvragen add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.ngs_deals add column if not exists dienst text references public.diensten_catalogus(slug);
+create index if not exists opdrachten_bedrijf on public.opdrachten (bedrijf);
+create index if not exists contracts_bedrijf on public.contracts (bedrijf);
+create index if not exists invoices_bedrijf on public.invoices (bedrijf);
+
+-- ── Backfill: enkel duidelijke regels, enkel lege nieuwe kolommen ──────────
+do $$
+declare t text;
+begin
+  -- updated_at-triggers even uit, zodat bestaande tijdstempels niet veranderen.
+  foreach t in array array['invoices:trg_invoices_updated', 'purchases:trg_purchases_updated', 'recurring_invoices:trg_recurring_invoices_updated', 'cost_entries:trg_cost_entries_updated', 'shoot_briefings:trg_shoot_briefings_updated'] loop
+    if exists (select 1 from pg_trigger where tgname = split_part(t, ':', 2)) then
+      execute format('alter table public.%I disable trigger %I', split_part(t, ':', 1), split_part(t, ':', 2));
+    end if;
+  end loop;
+
+  -- Projectkaarten: diensten (enkel zekere mapping), bedrijf uit merk of uit de diensten.
+  update public.opdrachten o set dienst_slugs = s.slugs
+  from (
+    select o2.id, array_agg(distinct m.dienst_slug order by m.dienst_slug) as slugs
+    from public.opdrachten o2
+    cross join lateral unnest(coalesce(o2.diensten, '{}')) d
+    join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d and m.dienst_zeker and m.dienst_slug is not null
+    group by o2.id
+  ) s where s.id = o.id and o.dienst_slugs is null;
+
+  update public.opdrachten set bedrijf = merk where bedrijf is null and merk in ('nextgenmedia', 'nextgensolutions');
+
+  update public.opdrachten o set bedrijf = s.b
+  from (
+    select o2.id, min(m.bedrijf) as b
+    from public.opdrachten o2
+    cross join lateral unnest(o2.diensten) d
+    left join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d
+    where o2.bedrijf is null and cardinality(o2.diensten) > 0
+    group by o2.id
+    having bool_and(m.bedrijf is not null and m.bedrijf_zeker) and count(distinct m.bedrijf) = 1
+  ) s where s.id = o.id and o.bedrijf is null;
+
+  -- Contracten: dienst uit service_slug; bedrijf uit de dienst of de projectkaart.
+  update public.contracts c set dienst = m.dienst_slug
+  from public.dienst_mapping m
+  where m.bron = 'service_slug' and m.oude_waarde = c.service_slug and m.dienst_zeker and c.dienst is null;
+
+  update public.contracts c set bedrijf = k.bedrijf
+  from public.diensten_catalogus k where k.slug = c.dienst and c.bedrijf is null;
+
+  update public.contracts c set bedrijf = o.bedrijf
+  from public.opdrachten o where o.contract_id = c.id and o.bedrijf is not null and c.bedrijf is null;
+
+  -- Facturen: dienst uit service_slug, anders uit het contract; bedrijf uit de dienst, anders uit het contract.
+  update public.invoices i set dienst = m.dienst_slug
+  from public.dienst_mapping m
+  where m.bron = 'service_slug' and m.oude_waarde = i.service_slug and m.dienst_zeker and i.dienst is null;
+
+  update public.invoices i set dienst = c.dienst
+  from public.contracts c where c.id = i.contract_id and c.dienst is not null and i.dienst is null;
+
+  update public.invoices i set bedrijf = k.bedrijf
+  from public.diensten_catalogus k where k.slug = i.dienst and i.bedrijf is null;
+
+  update public.invoices i set bedrijf = c.bedrijf
+  from public.contracts c where c.id = i.contract_id and c.bedrijf is not null and i.bedrijf is null;
+
+  -- Factuurregels: eigen service_slug, anders de factuur.
+  update public.invoice_lines l set dienst = m.dienst_slug
+  from public.dienst_mapping m
+  where m.bron = 'service_slug' and m.oude_waarde = l.service_slug and m.dienst_zeker and l.dienst is null;
+
+  update public.invoice_lines l set dienst = i.dienst
+  from public.invoices i where i.id = l.invoice_id and i.dienst is not null and l.dienst is null;
+
+  update public.invoice_lines l set bedrijf = k.bedrijf
+  from public.diensten_catalogus k where k.slug = l.dienst and l.bedrijf is null;
+
+  update public.invoice_lines l set bedrijf = i.bedrijf
+  from public.invoices i where i.id = l.invoice_id and i.bedrijf is not null and l.bedrijf is null;
+
+  -- Maandreeksen: via het contract.
+  update public.recurring_invoices r set dienst = c.dienst, bedrijf = coalesce(r.bedrijf, c.bedrijf)
+  from public.contracts c where c.id = r.contract_id and r.dienst is null and c.dienst is not null;
+
+  update public.recurring_invoices r set bedrijf = c.bedrijf
+  from public.contracts c where c.id = r.contract_id and r.bedrijf is null and c.bedrijf is not null;
+
+  -- Kosten op een factuur volgen de factuur.
+  update public.invoice_costs x set bedrijf = i.bedrijf
+  from public.invoices i where i.id = x.invoice_id and i.bedrijf is not null and x.bedrijf is null;
+
+  -- Teamtaken: het gekozen merk.
+  update public.team_taken set bedrijf = merk where bedrijf is null and merk in ('nextgenmedia', 'nextgensolutions');
+
+  -- Shoots: foto & video, dus Media.
+  update public.shoot_briefings set dienst = 'foto_video' where dienst is null;
+  update public.shoot_briefings set bedrijf = 'nextgenmedia' where bedrijf is null;
+
+  -- Opleveringen: video, foto's en grafisch zijn Media.
+  update public.opleveringen o set dienst = m.dienst_slug, bedrijf = coalesce(o.bedrijf, m.bedrijf)
+  from public.dienst_mapping m where m.bron = 'oplevering' and m.oude_waarde = o.soort and m.dienst_zeker and o.dienst is null;
+
+  -- Aanvragen: het type uit de catalogus van de klantapp.
+  update public.klant_aanvragen a set dienst = m.dienst_slug
+  from public.dienst_mapping m where m.bron = 'aanvraag_' || a.soort and m.oude_waarde = a.type and m.dienst_zeker and a.dienst is null;
+
+  update public.klant_aanvragen a set bedrijf = m.bedrijf
+  from public.dienst_mapping m where m.bron = 'aanvraag_' || a.soort and m.oude_waarde = a.type and m.bedrijf_zeker and a.bedrijf is null;
+
+  foreach t in array array['invoices:trg_invoices_updated', 'purchases:trg_purchases_updated', 'recurring_invoices:trg_recurring_invoices_updated', 'cost_entries:trg_cost_entries_updated', 'shoot_briefings:trg_shoot_briefings_updated'] loop
+    if exists (select 1 from pg_trigger where tgname = split_part(t, ':', 2)) then
+      execute format('alter table public.%I enable trigger %I', split_part(t, ':', 1), split_part(t, ':', 2));
+    end if;
+  end loop;
+end $$;
+
+-- ── Te classificeren: wat geen zeker bedrijf of dienst kreeg, met een voorstel ──
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'opdrachten', o.id::text, 'bedrijf',
+  case when 'ngs' = any(coalesce(o.diensten, '{}')) then 'nextgensolutions' else 'nextgenmedia' end,
+  case when coalesce(cardinality(o.diensten), 0) = 0 then 'Projectkaart zonder dienst.'
+       when 'ngs' = any(o.diensten) then 'Diensten van Media en Solutions op één kaart.'
+       else 'Dienst kan bij beide bedrijven horen (bv. consultancy).' end
+from public.opdrachten o where o.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'opdrachten', o.id::text, 'dienst', min(m.dienst_slug), min(coalesce(m.opmerking, 'Dienst niet zeker.'))
+from public.opdrachten o
+cross join lateral unnest(coalesce(o.diensten, '{}')) d
+join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d and not m.dienst_zeker
+where not (coalesce(o.dienst_slugs, '{}') @> array[m.dienst_slug])
+group by o.id
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'contracts', c.id::text, 'bedrijf',
+  case when c.tegengetekend_bedrijf = 'NextGenSolutions' then 'nextgensolutions' else 'nextgenmedia' end,
+  'Contract zonder dienst en zonder projectkaart met bedrijf.'
+from public.contracts c where c.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'contracts', c.id::text, 'dienst',
+  (select o.dienst_slugs[1] from public.opdrachten o where o.contract_id = c.id and cardinality(o.dienst_slugs) = 1 limit 1),
+  'Contract zonder dienst.'
+from public.contracts c where c.dienst is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'invoices', i.id::text, 'bedrijf', 'nextgenmedia',
+  case when i.contract_id is null then 'Factuur zonder contract en zonder dienst.' else 'Contract van deze factuur heeft nog geen bedrijf.' end
+from public.invoices i where i.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'recurring_invoices', r.id::text, 'bedrijf', 'nextgenmedia', 'Maandreeks zonder contract met bedrijf.'
+from public.recurring_invoices r where r.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'klant_meetings', m.id::text, 'bedrijf', 'nextgenmedia', 'Meeting zonder bedrijf.'
+from public.klant_meetings m where m.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'purchases', p.id::text, 'bedrijf', 'algemeen', 'Aankoop zonder bedrijf.'
+from public.purchases p where p.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'cost_entries', x.id::text, 'bedrijf', 'algemeen', 'Kost zonder bedrijf.'
+from public.cost_entries x where x.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'klant_aanvragen', a.id::text, 'bedrijf',
+  (select m.bedrijf from public.dienst_mapping m where m.bron = 'aanvraag_' || a.soort and m.oude_waarde = a.type),
+  'Aanvraag zonder zeker bedrijf.'
+from public.klant_aanvragen a where a.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'opleveringen', o.id::text, 'bedrijf', 'nextgenmedia', 'Oplevering zonder zeker bedrijf.'
+from public.opleveringen o where o.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+-- ── Verbeterplan fase 1b (26 nov 2026): nieuwe records krijgen vanzelf bedrijf en dienst ──
+-- Zelfde vaste regels als de backfill. Vult enkel lege velden, overschrijft nooit een keuze.
+-- Geen enkele trigger verstuurt iets (geen mail, ClickUp, Google of melding).
+create or replace function public.dienst_uit_mapping(p_bron text, p_waarde text) returns text
+language sql stable as $$
+  select dienst_slug from public.dienst_mapping where bron = p_bron and oude_waarde = p_waarde and dienst_zeker
+$$;
+create or replace function public.bedrijf_van_dienst(p_dienst text) returns text
+language sql stable as $$
+  select bedrijf from public.diensten_catalogus where slug = p_dienst
+$$;
+
+create or replace function public.vul_bedrijf_contract() returns trigger language plpgsql as $$
+begin
+  if new.dienst is null and new.service_slug is not null then new.dienst := public.dienst_uit_mapping('service_slug', new.service_slug); end if;
+  if new.bedrijf is null and new.dienst is not null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_contract on public.contracts;
+create trigger trg_vul_bedrijf_contract before insert or update of service_slug, dienst, bedrijf on public.contracts
+  for each row execute function public.vul_bedrijf_contract();
+
+create or replace function public.vul_bedrijf_factuur() returns trigger language plpgsql as $$
+declare c_dienst text; c_bedrijf text;
+begin
+  if new.contract_id is not null then
+    select dienst, bedrijf into c_dienst, c_bedrijf from public.contracts where id = new.contract_id;
+  end if;
+  if new.dienst is null and new.service_slug is not null then new.dienst := public.dienst_uit_mapping('service_slug', new.service_slug); end if;
+  if new.dienst is null then new.dienst := c_dienst; end if;
+  if new.bedrijf is null and new.dienst is not null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  if new.bedrijf is null then new.bedrijf := c_bedrijf; end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_factuur on public.invoices;
+create trigger trg_vul_bedrijf_factuur before insert or update of service_slug, contract_id, dienst, bedrijf on public.invoices
+  for each row execute function public.vul_bedrijf_factuur();
+drop trigger if exists trg_vul_bedrijf_reeks on public.recurring_invoices;
+create trigger trg_vul_bedrijf_reeks before insert or update of service_slug, contract_id, dienst, bedrijf on public.recurring_invoices
+  for each row execute function public.vul_bedrijf_factuur();
+
+create or replace function public.vul_bedrijf_factuurregel() returns trigger language plpgsql as $$
+declare i_dienst text; i_bedrijf text; c_dienst text; c_bedrijf text;
+begin
+  if new.invoice_id is not null then select dienst, bedrijf into i_dienst, i_bedrijf from public.invoices where id = new.invoice_id; end if;
+  if new.contract_id is not null then select dienst, bedrijf into c_dienst, c_bedrijf from public.contracts where id = new.contract_id; end if;
+  if new.dienst is null and new.service_slug is not null then new.dienst := public.dienst_uit_mapping('service_slug', new.service_slug); end if;
+  if new.dienst is null then new.dienst := coalesce(i_dienst, c_dienst); end if;
+  if new.bedrijf is null and new.dienst is not null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  if new.bedrijf is null then new.bedrijf := coalesce(i_bedrijf, c_bedrijf); end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_factuurregel on public.invoice_lines;
+create trigger trg_vul_bedrijf_factuurregel before insert or update of service_slug, invoice_id, contract_id, dienst, bedrijf on public.invoice_lines
+  for each row execute function public.vul_bedrijf_factuurregel();
+
+create or replace function public.vul_bedrijf_factuurkost() returns trigger language plpgsql as $$
+begin
+  if new.bedrijf is null and new.invoice_id is not null then select bedrijf into new.bedrijf from public.invoices where id = new.invoice_id; end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_factuurkost on public.invoice_costs;
+create trigger trg_vul_bedrijf_factuurkost before insert on public.invoice_costs
+  for each row execute function public.vul_bedrijf_factuurkost();
+
+-- Projectkaarten: diensten (zeker) naar de catalogus; manueel toegevoegde catalogusdiensten blijven.
+-- Bedrijf volgt het gekozen merk; anders afgeleid als alle diensten zeker bij één bedrijf horen.
+create or replace function public.vul_bedrijf_opdracht() returns trigger language plpgsql as $$
+declare nieuw_auto text[]; oud_auto text[]; handmatig text[]; afgeleid text; aantal int; onzeker int;
+begin
+  select coalesce(array_agg(distinct m.dienst_slug order by m.dienst_slug), '{}') into nieuw_auto
+  from unnest(coalesce(new.diensten, '{}')) d join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d and m.dienst_zeker and m.dienst_slug is not null;
+  if tg_op = 'INSERT' then
+    new.dienst_slugs := case when new.dienst_slugs is null then nullif(nieuw_auto, '{}') else (select array_agg(distinct x order by x) from unnest(new.dienst_slugs || nieuw_auto) x) end;
+  elsif new.diensten is distinct from old.diensten then
+    select coalesce(array_agg(distinct m.dienst_slug), '{}') into oud_auto
+    from unnest(coalesce(old.diensten, '{}')) d join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d and m.dienst_zeker and m.dienst_slug is not null;
+    select coalesce(array_agg(x), '{}') into handmatig from unnest(coalesce(old.dienst_slugs, '{}')) x where not (x = any(oud_auto));
+    new.dienst_slugs := (select nullif(coalesce(array_agg(distinct x order by x), '{}'), '{}') from unnest(handmatig || nieuw_auto) x);
+  end if;
+
+  if new.merk in ('nextgenmedia', 'nextgensolutions') and (tg_op = 'INSERT' or new.merk is distinct from old.merk) then
+    new.bedrijf := new.merk;
+  elsif new.bedrijf is null and cardinality(coalesce(new.diensten, '{}')) > 0 then
+    select min(m.bedrijf), count(distinct m.bedrijf), count(*) filter (where m.bedrijf is null or not m.bedrijf_zeker)
+      into afgeleid, aantal, onzeker
+    from unnest(new.diensten) d left join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d;
+    if aantal = 1 and onzeker = 0 then new.bedrijf := afgeleid; end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_opdracht on public.opdrachten;
+create trigger trg_vul_bedrijf_opdracht before insert or update of merk, diensten, bedrijf, dienst_slugs on public.opdrachten
+  for each row execute function public.vul_bedrijf_opdracht();
+
+create or replace function public.vul_bedrijf_aanvraag() returns trigger language plpgsql as $$
+declare m record;
+begin
+  select * into m from public.dienst_mapping where bron = 'aanvraag_' || new.soort and oude_waarde = new.type;
+  if found then
+    if new.dienst is null and m.dienst_zeker then new.dienst := m.dienst_slug; end if;
+    if new.bedrijf is null and m.bedrijf_zeker then new.bedrijf := m.bedrijf; end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_aanvraag on public.klant_aanvragen;
+create trigger trg_vul_bedrijf_aanvraag before insert on public.klant_aanvragen
+  for each row execute function public.vul_bedrijf_aanvraag();
+
+create or replace function public.vul_bedrijf_shoot() returns trigger language plpgsql as $$
+begin
+  if new.dienst is null then new.dienst := 'foto_video'; end if;
+  if new.bedrijf is null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_shoot on public.shoot_briefings;
+create trigger trg_vul_bedrijf_shoot before insert on public.shoot_briefings
+  for each row execute function public.vul_bedrijf_shoot();
+
+create or replace function public.vul_bedrijf_oplevering() returns trigger language plpgsql as $$
+declare m record;
+begin
+  if new.dienst is null then
+    select * into m from public.dienst_mapping where bron = 'oplevering' and oude_waarde = new.soort and dienst_zeker;
+    if found then new.dienst := m.dienst_slug; end if;
+  end if;
+  if new.bedrijf is null and new.dienst is not null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_oplevering on public.opleveringen;
+create trigger trg_vul_bedrijf_oplevering before insert or update of soort on public.opleveringen
+  for each row execute function public.vul_bedrijf_oplevering();
+
+create or replace function public.vul_bedrijf_teamtaak() returns trigger language plpgsql as $$
+begin
+  if new.merk in ('nextgenmedia', 'nextgensolutions') and (new.bedrijf is null or tg_op = 'INSERT' or new.merk is distinct from old.merk) then new.bedrijf := new.merk; end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_teamtaak on public.team_taken;
+create trigger trg_vul_bedrijf_teamtaak before insert or update of merk on public.team_taken
+  for each row execute function public.vul_bedrijf_teamtaak();
+
+-- Wachtrij bijhouden: een gekozen bedrijf of dienst lost de open vraag op;
+-- een nieuwe projectkaart, contract of factuur zonder bedrijf komt erbij.
+create or replace function public.sync_te_classificeren() returns trigger language plpgsql as $$
+declare heeft_dienst boolean;
+begin
+  if tg_op = 'UPDATE' and new.bedrijf is not distinct from old.bedrijf
+     and (to_jsonb(new) ->> 'dienst') is not distinct from (to_jsonb(old) ->> 'dienst') then
+    return null;
+  end if;
+  if new.bedrijf is not null then
+    update public.te_classificeren set opgelost_op = now(), keuze = new.bedrijf
+    where tabel = tg_table_name and rij_id = new.id::text and veld = 'bedrijf' and opgelost_op is null;
+  elsif tg_op = 'INSERT' and tg_table_name in ('opdrachten', 'contracts', 'invoices') then
+    insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+    values (tg_table_name, new.id::text, 'bedrijf', 'nextgenmedia', 'Nieuw aangemaakt zonder bedrijf.')
+    on conflict (tabel, rij_id, veld) do nothing;
+  end if;
+  heeft_dienst := tg_table_name in ('contracts', 'invoices', 'recurring_invoices', 'klant_aanvragen', 'opleveringen');
+  if heeft_dienst and (to_jsonb(new) ->> 'dienst') is not null then
+    update public.te_classificeren set opgelost_op = now(), keuze = to_jsonb(new) ->> 'dienst'
+    where tabel = tg_table_name and rij_id = new.id::text and veld = 'dienst' and opgelost_op is null;
+  end if;
+  return null;
+end $$;
+do $$
+declare t text;
+begin
+  foreach t in array array['opdrachten', 'contracts', 'invoices', 'recurring_invoices', 'klant_meetings', 'purchases', 'cost_entries', 'klant_aanvragen', 'opleveringen'] loop
+    execute format('drop trigger if exists trg_sync_te_classificeren on public.%I', t);
+    execute format('create trigger trg_sync_te_classificeren after insert or update on public.%I for each row execute function public.sync_te_classificeren()', t);
+  end loop;
+end $$;
+
+-- Verbeterplan fase 1c (26 nov 2026): eigen weergave Alles / Media / Solutions per gebruiker.
+alter table public.gebruikers_voorkeuren add column if not exists bedrijf_filter text;
+
+-- ── Verbeterplan fase 2 (26 nov 2026): merk per bedrijf, sjablonen per bedrijf ──
+-- Enkel toevoegend. Merkgegevens per bedrijf (Instellingen → Diensten → Bedrijven),
+-- en een bedrijf op contracttemplates, mailtemplates en offertesjablonen.
+alter table public.bedrijven add column if not exists website text;
+alter table public.bedrijven add column if not exists email text;
+alter table public.bedrijven add column if not exists antwoord_email text;
+alter table public.bedrijven add column if not exists voettekst text;
+alter table public.bedrijven add column if not exists updated_at timestamptz;
+update public.bedrijven set website = 'nextgenmedia.be', email = 'info@nextgenmedia.be', antwoord_email = 'info@nextgenmedia.be' where slug = 'nextgenmedia' and website is null;
+update public.bedrijven set website = 'nextgensolutions.be', email = 'info@nextgensolutions.be', antwoord_email = 'info@nextgensolutions.be' where slug = 'nextgensolutions' and website is null;
+update public.bedrijven set website = 'nextgenagency.be', email = 'legal@nextgenmedia.be', antwoord_email = 'info@nextgenmedia.be' where slug = 'algemeen' and website is null;
+
+alter table public.contract_templates add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.email_templates add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.offerte_sjablonen add column if not exists bedrijf text references public.bedrijven(slug);
+-- Offertesjablonen hebben al een merk: dat is het bedrijf (enkel de nieuwe kolom, enkel waar leeg).
+update public.offerte_sjablonen set bedrijf = merk where bedrijf is null and merk in ('nextgenmedia', 'nextgensolutions');
+
+-- ── Algemene contracten: meerdere ondertekenaars van ons (27 nov 2026) ──────
+-- Wie van ons tekent (Marco, Bram, Chiara; leeg = één van ons), de zone per
+-- persoon en elke handtekening apart. Enkel nieuwe kolommen; een handtekening
+-- van vóór deze migratie blijft in ons_getekend_* en telt gewoon mee.
+alter table public.algemene_contracten add column if not exists ons_tekenaars text[];
+alter table public.algemene_contracten add column if not exists ons_zones jsonb;
+alter table public.algemene_contracten add column if not exists ons_handtekeningen jsonb;
+
+-- ── Verbeterplan fase 3 (27 nov 2026): teamagenda ───────────────────────────
+-- Enkel toevoegend. Reeksen (vaste blokken, herhalende afspraken en taken), beschikbaarheid
+-- per persoon, iCal-links en verschillen met ClickUp. RLS aan, enkel de service-role (zoals ag_*).
+create table if not exists public.ag_reeksen (
+  id uuid primary key default gen_random_uuid(),
+  -- blok = vast blok (Sales, Focuswerk, Overleg, Opleiding …); afspraak; taak
+  soort text not null default 'blok' check (soort in ('blok', 'afspraak', 'taak')),
+  blok_type text,
+  titel text not null,
+  kleur text,
+  personen uuid[] not null default '{}',
+  lijst_id uuid references public.ag_lijsten(id) on delete set null,
+  prive boolean not null default false,
+  -- 1 = maandag … 7 = zondag
+  dagen smallint[] not null default '{}',
+  interval_weken smallint not null default 1 check (interval_weken between 1 and 8),
+  van text,
+  tot text,
+  start_datum date not null,
+  eind_datum date,
+  uitzonderingen date[] not null default '{}',
+  eigenaar_id uuid references public.ag_personen(id) on delete set null,
+  gemaakt_door text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  verwijderd_op timestamptz
+);
+create index if not exists ag_reeksen_actief on public.ag_reeksen (start_datum) where verwijderd_op is null;
+alter table public.ag_reeksen enable row level security;
+
+-- Een keer van een herhalende taak die afgevinkt of aangepast werd, wordt een gewoon item.
+alter table public.ag_items add column if not exists reeks_id uuid references public.ag_reeksen(id) on delete set null;
+alter table public.ag_items add column if not exists reeks_datum date;
+create unique index if not exists ag_items_reeks_keer on public.ag_items (reeks_id, reeks_datum) where reeks_id is not null;
+
+-- Wanneer iemand normaal werkt (per weekdag), als lichte achtergrond en voor de capaciteit.
+create table if not exists public.ag_beschikbaarheid (
+  persoon_id uuid not null references public.ag_personen(id) on delete cascade,
+  weekdag smallint not null check (weekdag between 1 and 7),
+  van text not null,
+  tot text not null,
+  updated_at timestamptz not null default now(),
+  primary key (persoon_id, weekdag)
+);
+alter table public.ag_beschikbaarheid enable row level security;
+
+-- Agenda-abonnement (iCal) per persoon: enkel de SHA-256 van de link, in te trekken.
+create table if not exists public.ag_ical_links (
+  id uuid primary key default gen_random_uuid(),
+  persoon_id uuid not null references public.ag_personen(id) on delete cascade,
+  team boolean not null default false,
+  token_hash text not null unique,
+  created_at timestamptz not null default now(),
+  ingetrokken_op timestamptz,
+  laatst_gebruikt_op timestamptz
+);
+alter table public.ag_ical_links enable row level security;
+
+-- Verschillen met ClickUp: de import sloeg een nieuwere ClickUp-versie over omdat het item in de app aangepast werd.
+alter table public.ag_items add column if not exists clickup_verschil_op timestamptz;
+alter table public.ag_items add column if not exists clickup_verschil jsonb;
+-- ════════════════════════════════════════════════════════════════════════════
+-- Verbeterplan fase 4: rollen, rechten en plug-and-play (27 nov 2026).
+-- Enkel toevoegen: nieuwe tabellen (RLS aan, enkel de service-role) en nieuwe
+-- kolommen (leeg). Geen bestaande data gewijzigd. Terugdraaien:
+-- supabase/terugdraaien/fase4.sql
+-- ════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS public.rol_sjablonen (
+  key text PRIMARY KEY,
+  naam text NOT NULL,
+  omschrijving text,
+  rol text NOT NULL DEFAULT 'medewerker',
+  modules text[] NOT NULL DEFAULT '{}',
+  bedrijven text[] NOT NULL DEFAULT '{}',
+  onboarding jsonb NOT NULL DEFAULT '[]'::jsonb,
+  startpagina text,
+  volgorde integer NOT NULL DEFAULT 0,
+  actief boolean NOT NULL DEFAULT true,
+  standaard boolean NOT NULL DEFAULT false,
+  gewijzigd_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.rol_sjablonen ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS rol_sjabloon text;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS bedrijven text[];
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS start_datum date;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS eind_datum date;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS offboarding_op timestamptz;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS offboarding_door text;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS offboarding_notitie text;
+
+CREATE TABLE IF NOT EXISTS public.onboarding_stappen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  staff_id uuid NOT NULL REFERENCES public.staff_members(id) ON DELETE CASCADE,
+  titel text NOT NULL,
+  volgorde integer NOT NULL DEFAULT 0,
+  gedaan_op timestamptz,
+  gedaan_door text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS onboarding_stappen_staff ON public.onboarding_stappen (staff_id, volgorde);
+ALTER TABLE public.onboarding_stappen ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS functieprofiel jsonb;
+
+-- Werkinstructies in Informatief: per bedrijf, dienst of rol, met versies en "Gelezen".
+CREATE TABLE IF NOT EXISTS public.werkinstructies (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  titel text NOT NULL,
+  inhoud text NOT NULL DEFAULT '',
+  bedrijf text,
+  dienst_slug text,
+  rol_sjabloon text,
+  versie integer NOT NULL DEFAULT 1,
+  gearchiveerd_op timestamptz,
+  gemaakt_door text,
+  gewijzigd_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.werkinstructies ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.werkinstructie_versies (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  instructie_id uuid NOT NULL REFERENCES public.werkinstructies(id) ON DELETE CASCADE,
+  versie integer NOT NULL,
+  titel text NOT NULL,
+  inhoud text NOT NULL DEFAULT '',
+  opgeslagen_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (instructie_id, versie)
+);
+ALTER TABLE public.werkinstructie_versies ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.werkinstructie_gelezen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  instructie_id uuid NOT NULL REFERENCES public.werkinstructies(id) ON DELETE CASCADE,
+  versie integer NOT NULL,
+  auth_user_id uuid NOT NULL,
+  naam text,
+  gelezen_op timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (instructie_id, versie, auth_user_id)
+);
+ALTER TABLE public.werkinstructie_gelezen ENABLE ROW LEVEL SECURITY;
+
+-- De zeven startsjablonen (enkel als ze er nog niet staan; aanpassen kan in Instellingen).
+INSERT INTO public.rol_sjablonen (key, naam, omschrijving, rol, modules, bedrijven, onboarding, startpagina, volgorde, standaard) VALUES
+ ('zaakvoerder','Zaakvoerder','Alles zien en beheren. Een hoofdbeheerder blijft een apart admin-account.','beheerder','{}','{}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Financieel overzicht en vesting doornemen"]','/admin',1,true),
+ ('operations','Operations','Klanten, projecten, contracten, meetings en levering opvolgen.','medewerker','{agenda,clients,contracts,aanvragen,offertes,opdrachten,meetings,opleveringen,shoots,content,uploads,formulieren,materiaal,email,info}','{}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Projecten en Op te volgen doornemen","Meeting Inplanner: een meeting plannen"]','/admin',2,true),
+ ('uitvoerder_solutions','Uitvoerder Solutions','Werkt aan AI-automatisatie en software voor NextGenSolutions.','medewerker','{agenda,nextgensolutions,opdrachten,meetings,uploads,info}','{nextgensolutions}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Pipeline NextGenSolutions doornemen","Projecten van Solutions bekijken"]','/admin/agenda',3,true),
+ ('uitvoerder_media','Uitvoerder Media','Content, shoots en opleveringen voor NextGenMedia.','medewerker','{agenda,content,metricool,shoots,opleveringen,uploads,blogs,clients,info}','{nextgenmedia}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Contentkalender en Metricool doornemen","Shoot planner en opleveringen bekijken"]','/admin/agenda',4,true),
+ ('appointment_setter','Appointment setter','Afspraken boeken voor de zaakvoerders.','medewerker','{sales,meetings,agenda}','{}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Meeting Inplanner: een verkoopafspraak boeken"]','/admin/meetings',5,true),
+ ('lead_onderzoeker','Lead-onderzoeker','Bedrijven opzoeken en aanvullen in Account-based marketing.','medewerker','{opdrachten,agenda,info}','{}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Account-based marketing: importeren en aanvullen"]','/admin/opdrachten',6,true),
+ ('stagiair','Stagiair','Leest mee en werkt aan wat in de agenda staat.','medewerker','{agenda,info,uploads}','{}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Stageovereenkomst in het personeelsdossier","Eerste week: dagelijks Dag afsluiten"]','/admin/agenda',7,true)
+ON CONFLICT (key) DO NOTHING;
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Verbeterplan fase 5: NextGenSolutions als volwaardige omgeving en levering
+-- (27 nov 2026). Enkel toevoegen: een optionele klant op een deal en nieuwe
+-- tabellen voor de levering (RLS aan, enkel de service-role). Geen bestaande
+-- data gewijzigd. Terugdraaien: supabase/terugdraaien/fase5.sql
+-- ════════════════════════════════════════════════════════════════════════════
+
+ALTER TABLE public.ngs_deals ADD COLUMN IF NOT EXISTS client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS ngs_deals_client ON public.ngs_deals (client_id) WHERE client_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.ngs_projecten (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id uuid REFERENCES public.ngs_deals(id) ON DELETE SET NULL,
+  client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  titel text NOT NULL,
+  fase text NOT NULL DEFAULT 'briefing',
+  fase_sinds timestamptz NOT NULL DEFAULT now(),
+  verantwoordelijke text,
+  briefing jsonb NOT NULL DEFAULT '{}'::jsonb,
+  briefing_bevestigd_op timestamptz,
+  briefing_bevestigd_door text,
+  tijdscan_op date,
+  tijdscan_notities text,
+  plan_uurtarief numeric,
+  plan_prijs numeric,
+  plan_goedgekeurd_op timestamptz,
+  plan_goedgekeurd_door text,
+  review_dag integer,
+  review_uur text,
+  review_reeks_id uuid,
+  acties jsonb NOT NULL DEFAULT '[]'::jsonb,
+  gearchiveerd_op timestamptz,
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ngs_projecten_deal ON public.ngs_projecten (deal_id) WHERE deal_id IS NOT NULL AND gearchiveerd_op IS NULL;
+CREATE INDEX IF NOT EXISTS ngs_projecten_client ON public.ngs_projecten (client_id);
+ALTER TABLE public.ngs_projecten ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.ngs_user_stories (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES public.ngs_projecten(id) ON DELETE CASCADE,
+  nummer integer NOT NULL,
+  titel text NOT NULL,
+  als text NOT NULL DEFAULT '',
+  wil text NOT NULL DEFAULT '',
+  zodat text NOT NULL DEFAULT '',
+  acceptatiecriteria text[] NOT NULL DEFAULT '{}',
+  schatting_uren numeric,
+  bestede_uren numeric NOT NULL DEFAULT 0,
+  status text NOT NULL DEFAULT 'voorstel',
+  dod jsonb NOT NULL DEFAULT '[]'::jsonb,
+  klant_akkoord_op timestamptz,
+  klant_akkoord_door text,
+  volgorde integer NOT NULL DEFAULT 0,
+  verwijderd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (project_id, nummer)
+);
+ALTER TABLE public.ngs_user_stories ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.ngs_care (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  project_id uuid REFERENCES public.ngs_projecten(id) ON DELETE SET NULL,
+  naam text NOT NULL,
+  omschrijving text,
+  systemen text[] NOT NULL DEFAULT '{}',
+  status text NOT NULL DEFAULT 'actief',
+  care_contract boolean NOT NULL DEFAULT false,
+  maandbedrag numeric,
+  controle_elke_dagen integer,
+  laatste_controle date,
+  notitie text,
+  gearchiveerd_op timestamptz,
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ngs_care_client ON public.ngs_care (client_id);
+ALTER TABLE public.ngs_care ENABLE ROW LEVEL SECURITY;
+
+-- ── Verbeterplan fase 6: levering Media en sales (27 nov 2026) ─────────────
+-- Additief: nieuwe kolommen en een ruimere bronnencontrole (enkel extra waarden).
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS tijd_rijden_min integer;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS tijd_shoot_min integer;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS tijd_nabewerking_min integer;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS afspraak_soort text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'shoot_briefings_afspraak_soort_check') THEN
+    ALTER TABLE public.shoot_briefings ADD CONSTRAINT shoot_briefings_afspraak_soort_check CHECK (afspraak_soort IS NULL OR afspraak_soort IN ('retainer','traject','eenmalig'));
+  END IF;
+END $$;
+ALTER TABLE public.diensten_catalogus ADD COLUMN IF NOT EXISTS deliverables jsonb NOT NULL DEFAULT '[]'::jsonb;
+-- Eén bronnenlijst (lib/sales/bronnen.ts): de oude waarden blijven geldig.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'opdrachten_bron_check' AND pg_get_constraintdef(oid) NOT LIKE '%bestaande_klant%') THEN
+    ALTER TABLE public.opdrachten DROP CONSTRAINT opdrachten_bron_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'opdrachten_bron_check') THEN
+    ALTER TABLE public.opdrachten ADD CONSTRAINT opdrachten_bron_check CHECK (bron IS NULL OR bron IN ('inbound','outbound','inbound_website','doorverwezen','netwerk','lezing','event','bestaande_klant','doorverwijzing','andere'));
+  END IF;
+END $$;
+
+-- ── Verbeterplan fase 7: financieel, scorecard en ritme (27 nov 2026) ──────
+-- Additief: nieuwe kolommen (leeg) en nieuwe tabellen met RLS aan (enkel service-role).
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL;
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS opdracht_id uuid REFERENCES public.opdrachten(id) ON DELETE SET NULL;
+ALTER TABLE public.cost_entries ADD COLUMN IF NOT EXISTS opdracht_id uuid REFERENCES public.opdrachten(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS purchases_client ON public.purchases(client_id) WHERE client_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS cost_entries_client ON public.cost_entries(client_id) WHERE client_id IS NOT NULL;
+ALTER TABLE public.team_taken ADD COLUMN IF NOT EXISTS beloofd_aan text;
+ALTER TABLE public.werkinstructies ADD COLUMN IF NOT EXISTS soort text NOT NULL DEFAULT 'instructie';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'werkinstructies_soort_check') THEN
+    ALTER TABLE public.werkinstructies ADD CONSTRAINT werkinstructies_soort_check CHECK (soort IN ('instructie','afspraken'));
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS public.ritme_weekoverleg (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  week date NOT NULL UNIQUE,
+  notities jsonb NOT NULL DEFAULT '{}'::jsonb,
+  acties jsonb NOT NULL DEFAULT '[]'::jsonb,
+  aanwezig text[] NOT NULL DEFAULT '{}',
+  afgesloten_op timestamptz,
+  bijgewerkt_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.ritme_kwartaaldoelen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  kwartaal text NOT NULL CHECK (kwartaal ~ '^\d{4}-Q[1-4]$'),
+  titel text NOT NULL,
+  bedrijf text CHECK (bedrijf IS NULL OR bedrijf IN ('nextgenmedia','nextgensolutions')),
+  eigenaar text NOT NULL,
+  status text NOT NULL DEFAULT 'op_schema' CHECK (status IN ('op_schema','achter','af','niet_gehaald')),
+  notitie text,
+  gemaakt_door text,
+  gearchiveerd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ritme_kwartaaldoelen_kw ON public.ritme_kwartaaldoelen(kwartaal);
+CREATE TABLE IF NOT EXISTS public.ritme_beslissingen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  titel text NOT NULL,
+  toelichting text,
+  bedrijf text CHECK (bedrijf IS NULL OR bedrijf IN ('nextgenmedia','nextgensolutions')),
+  voorgesteld_door text,
+  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open','aangenomen','verworpen')),
+  beslist_op timestamptz,
+  gearchiveerd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.ritme_stemmen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  beslissing_id uuid NOT NULL REFERENCES public.ritme_beslissingen(id) ON DELETE CASCADE,
+  auth_user_id uuid NOT NULL,
+  naam text,
+  stem text NOT NULL CHECK (stem IN ('voor','tegen','onthouding')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (beslissing_id, auth_user_id)
+);
+CREATE TABLE IF NOT EXISTS public.een_op_een (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  personeel_id uuid NOT NULL REFERENCES public.personeel(id) ON DELETE CASCADE,
+  medewerker_user_id uuid,
+  met_user_id uuid,
+  met_naam text,
+  datum date NOT NULL,
+  notities text,
+  afspraken jsonb NOT NULL DEFAULT '[]'::jsonb,
+  verwijderd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS een_op_een_personeel ON public.een_op_een(personeel_id);
+CREATE INDEX IF NOT EXISTS een_op_een_mensen ON public.een_op_een(medewerker_user_id, met_user_id);
+ALTER TABLE public.ritme_weekoverleg ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ritme_kwartaaldoelen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ritme_beslissingen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ritme_stemmen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.een_op_een ENABLE ROW LEVEL SECURITY;
+
+-- ── Open punten verbeterplan (27 nov 2026) ───────────────────────────────────
+-- E39: bedrijf op een agenda-map (kleur en filter op bedrijf). I71: voor welk bedrijf een
+-- ABM-bedrijf benaderd wordt. K89: bij welk bedrijf een teamlid in Meeting boeken staat
+-- (leeg = beide). Enkel toevoegend, leeg, geen backfill. Terugdraaien: supabase/terugdraaien/open-punten.sql
+alter table public.ag_mappen add column if not exists bedrijf text;
+alter table public.abm_bedrijven add column if not exists bedrijf text;
+alter table public.personeel add column if not exists klantapp_bedrijven text[];
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'ag_mappen_bedrijf_check') then
+    alter table public.ag_mappen add constraint ag_mappen_bedrijf_check check (bedrijf is null or bedrijf in ('nextgenmedia', 'nextgensolutions', 'algemeen'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'abm_bedrijven_bedrijf_check') then
+    alter table public.abm_bedrijven add constraint abm_bedrijven_bedrijf_check check (bedrijf is null or bedrijf in ('nextgenmedia', 'nextgensolutions', 'algemeen'));
+  end if;
+end $$;
+
+-- ── Nieuwe werking fase 1 (28 nov 2026): beslissingen per domein ─────────────
+ALTER TABLE ritme_beslissingen ADD COLUMN IF NOT EXISTS domein text;
+ALTER TABLE ritme_beslissingen ADD COLUMN IF NOT EXISTS eigenaar text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ritme_beslissingen_domein_check') THEN
+    ALTER TABLE ritme_beslissingen ADD CONSTRAINT ritme_beslissingen_domein_check
+      CHECK (domein IS NULL OR domein IN ('solutions','media','financien_legal','interne_werking','meerdere'));
+  END IF;
+END $$;
+INSERT INTO app_settings (key, value, updated_at)
+SELECT 'rol_sjablonen_backup_20261128', jsonb_agg(to_jsonb(r)), now() FROM rol_sjablonen r
+ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value, updated_at)
+SELECT 'contentplanning_backup_20261128', value, now() FROM app_settings WHERE key = 'contentplanning'
+ON CONFLICT (key) DO NOTHING;
+
+-- ── Nieuwe werking fase 2 (28 nov 2026): verkoop bij Solutions ───────────────
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS vervolg_op timestamptz;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS vervolg_meeting_id uuid;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS processen integer;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_prijs numeric;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_contract_id uuid;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_buiten_app boolean NOT NULL DEFAULT false;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_buiten_notitie text;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS auditdag_op date;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS presentatie_op date;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_checklist jsonb NOT NULL DEFAULT '{}'::jsonb;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ngs_deals_processen_check') THEN
+    ALTER TABLE ngs_deals ADD CONSTRAINT ngs_deals_processen_check CHECK (processen IS NULL OR (processen BETWEEN 1 AND 20));
+  END IF;
+END $$;
+ALTER TABLE ngs_deals DROP CONSTRAINT IF EXISTS ngs_deals_fase_check;
+ALTER TABLE ngs_deals ADD CONSTRAINT ngs_deals_fase_check CHECK (fase = ANY (ARRAY['afspraak','voorstel','opvolgen','audit','opvolgen_rapport','won','lost']));
+ALTER TABLE ngs_deal_notities ADD COLUMN IF NOT EXISTS uitkomst text;
+CREATE TABLE IF NOT EXISTS ngs_deal_fases (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id uuid NOT NULL REFERENCES ngs_deals(id) ON DELETE CASCADE,
+  van text, naar text NOT NULL, op timestamptz NOT NULL DEFAULT now(), door text
+);
+CREATE INDEX IF NOT EXISTS ngs_deal_fases_deal_idx ON ngs_deal_fases (deal_id, op);
+CREATE INDEX IF NOT EXISTS ngs_deal_fases_naar_idx ON ngs_deal_fases (naar, op);
+ALTER TABLE ngs_deal_fases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE klant_meetings ADD COLUMN IF NOT EXISTS ngs_deal_id uuid;
+CREATE INDEX IF NOT EXISTS klant_meetings_ngs_deal_idx ON klant_meetings (ngs_deal_id) WHERE ngs_deal_id IS NOT NULL;
+ALTER TABLE contracts ADD COLUMN IF NOT EXISTS ngs_deal_id uuid;
+CREATE INDEX IF NOT EXISTS contracts_ngs_deal_idx ON contracts (ngs_deal_id) WHERE ngs_deal_id IS NOT NULL;
+ALTER TABLE opdrachten ADD COLUMN IF NOT EXISTS ngs_deal_id uuid;
+ALTER TABLE opdrachten ADD COLUMN IF NOT EXISTS ngs_keuze text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'opdrachten_ngs_keuze_check') THEN
+    ALTER TABLE opdrachten ADD CONSTRAINT opdrachten_ngs_keuze_check CHECK (ngs_keuze IS NULL OR ngs_keuze IN ('verhuisd','laten'));
+  END IF;
+END $$;
+INSERT INTO ngs_deal_fases (deal_id, van, naar, op, door)
+SELECT d.id, NULL, d.fase, coalesce(d.fase_sinds, d.created_at), 'Beginstand 28 nov 2026'
+FROM ngs_deals d WHERE NOT EXISTS (SELECT 1 FROM ngs_deal_fases f WHERE f.deal_id = d.id);
+
+-- ═══ Nieuwe werking fase 3 (28 nov 2026): auditrapport en prijs per workflow. Additief. ═══
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_notities text;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS briefing_notities text;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS rapport_afgerond_op timestamptz;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS rapport_afgerond_door text;
+CREATE TABLE IF NOT EXISTS ngs_workflows (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id uuid REFERENCES ngs_deals(id) ON DELETE CASCADE,
+  project_id uuid REFERENCES ngs_projecten(id) ON DELETE SET NULL,
+  volgorde integer NOT NULL DEFAULT 0,
+  naam text NOT NULL,
+  oplossing text,
+  soort text NOT NULL DEFAULT 'tijd' CHECK (soort IN ('tijd','andere_waarde')),
+  geschatte_uren numeric,
+  marktcheck text,
+  interface_of_logboek boolean NOT NULL DEFAULT false,
+  maat text CHECK (maat IS NULL OR maat IN ('klein','middel','groot')),
+  prijs numeric,
+  prijs_reden text,
+  verwijderd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ngs_workflows_deal_idx ON ngs_workflows (deal_id) WHERE verwijderd_op IS NULL;
+CREATE INDEX IF NOT EXISTS ngs_workflows_project_idx ON ngs_workflows (project_id) WHERE project_id IS NOT NULL;
+ALTER TABLE ngs_workflows ENABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS ngs_audit_processen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id uuid NOT NULL REFERENCES ngs_deals(id) ON DELETE CASCADE,
+  workflow_id uuid REFERENCES ngs_workflows(id) ON DELETE SET NULL,
+  volgorde integer NOT NULL DEFAULT 0,
+  naam text NOT NULL,
+  betrokkenen jsonb NOT NULL DEFAULT '[]'::jsonb,
+  uren_per_week numeric NOT NULL DEFAULT 0,
+  notitie text,
+  verwijderd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ngs_audit_processen_deal_idx ON ngs_audit_processen (deal_id) WHERE verwijderd_op IS NULL;
+ALTER TABLE ngs_audit_processen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ngs_user_stories ADD COLUMN IF NOT EXISTS workflow_id uuid REFERENCES ngs_workflows(id) ON DELETE SET NULL;
+
+-- ═══ Nieuwe werking fase 4 (28 nov 2026): levering per workflow. Additief. ═══
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS fase text NOT NULL DEFAULT 'gepland';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ngs_workflows_fase_check') THEN
+    ALTER TABLE ngs_workflows ADD CONSTRAINT ngs_workflows_fase_check CHECK (fase IN ('gepland','bouw','oplevering','nazorg','klaar'));
+  END IF;
+END $$;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS fase_sinds timestamptz;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS bouw_start timestamptz;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS wacht_op_klant boolean NOT NULL DEFAULT false;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS wacht_reden text;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS wacht_sinds timestamptz;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS wacht_dagen integer NOT NULL DEFAULT 0;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS opname_link text;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS video_link text;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS video_gestuurd_op timestamptz;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS video_email_id uuid;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS oplevering_op timestamptz;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS nazorg_start timestamptz;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS nazorg_calls jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS klaar_op timestamptz;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS verantwoordelijke text;
+ALTER TABLE klant_meetings ADD COLUMN IF NOT EXISTS ngs_workflow_id uuid REFERENCES ngs_workflows(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS klant_meetings_ngs_workflow_idx ON klant_meetings (ngs_workflow_id) WHERE ngs_workflow_id IS NOT NULL;
+
+-- ═══ Nieuwe werking fase 5 (28 nov 2026): facturatie van Solutions. Additief. ═══
+ALTER TABLE bedrijven ADD COLUMN IF NOT EXISTS betaaltermijn_dagen integer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'bedrijven_betaaltermijn_check') THEN
+    ALTER TABLE bedrijven ADD CONSTRAINT bedrijven_betaaltermijn_check CHECK (betaaltermijn_dagen IS NULL OR (betaaltermijn_dagen >= 0 AND betaaltermijn_dagen <= 365));
+  END IF;
+END $$;
+UPDATE bedrijven SET betaaltermijn_dagen = 30 WHERE slug = 'nextgensolutions' AND betaaltermijn_dagen IS NULL;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_factuur_id uuid REFERENCES invoices(id) ON DELETE SET NULL;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS factuur_id uuid REFERENCES invoices(id) ON DELETE SET NULL;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS verrekend_bedrag numeric;
+
+-- ═══ Nieuwe werking fase 6 (28 nov 2026): Care-pakketten en overdracht. Additief. ═══
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS pakket text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ngs_care_pakket_check') THEN
+    ALTER TABLE ngs_care ADD CONSTRAINT ngs_care_pakket_check CHECK (pakket IS NULL OR pakket IN ('basis','plus','pro'));
+  END IF;
+END $$;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS vercel_url text;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS supabase_ref text;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS github_url text;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS monitor_url text;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS db_gb numeric;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS bestanden_gb numeric;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS gemeten_op timestamptz;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS meetbron text;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS overdracht jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS reeks_id uuid;
+CREATE TABLE IF NOT EXISTS ngs_care_uren (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  care_id uuid NOT NULL REFERENCES ngs_care(id) ON DELETE CASCADE,
+  datum date NOT NULL,
+  uren numeric NOT NULL CHECK (uren > 0 AND uren <= 24),
+  omschrijving text, door text, verwijderd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ngs_care_uren_care_idx ON ngs_care_uren (care_id, datum) WHERE verwijderd_op IS NULL;
+ALTER TABLE ngs_care_uren ENABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS ngs_care_support (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  care_id uuid NOT NULL REFERENCES ngs_care(id) ON DELETE CASCADE,
+  binnen_op timestamptz NOT NULL DEFAULT now(),
+  kanaal text NOT NULL DEFAULT 'telefoon' CHECK (kanaal IN ('telefoon','mail','klantapp')),
+  vraag text NOT NULL, deadline timestamptz NOT NULL, opgelost_op timestamptz, door text, opgelost_door text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ngs_care_support_open_idx ON ngs_care_support (care_id) WHERE opgelost_op IS NULL;
+ALTER TABLE ngs_care_support ENABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS ngs_care_checks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  care_id uuid NOT NULL REFERENCES ngs_care(id) ON DELETE CASCADE,
+  op timestamptz NOT NULL DEFAULT now(), ok boolean NOT NULL, status integer, ms integer, fout text
+);
+CREATE INDEX IF NOT EXISTS ngs_care_checks_care_idx ON ngs_care_checks (care_id, op DESC);
+ALTER TABLE ngs_care_checks ENABLE ROW LEVEL SECURITY;
+-- Monitoring (pg_cron, elke 10 minuten): SELECT cron.schedule('care-monitoring', '*/10 * * * *', $$ SELECT net.http_post(url := 'https://app.nextgenmedia.be/api/cron/care', headers := jsonb_build_object('Content-Type','application/json','x-sync-secret',(SELECT waarde FROM public.cron_geheimen WHERE sleutel = 'klantmeetings')), body := '{}'::jsonb, timeout_milliseconds := 58000); $$);

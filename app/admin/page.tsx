@@ -1,447 +1,143 @@
 export const dynamic = 'force-dynamic'
 
-import { createClient } from '@/lib/supabase/server'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
-import { formatDate, SERVICE_LABELS } from '@/lib/utils'
+import { Suspense } from 'react'
 import Link from 'next/link'
-import {
-  Clock,
-  AlertTriangle,
-  Users,
-  ArrowRight,
-  Bell,
-  CalendarClock,
-} from 'lucide-react'
+import { RitmeClient } from './ritme/ritme-client'
+import { overlegLoopt } from '@/lib/werking/instellingen'
+import { WerkvoorraadBlok } from './ritme/werkvoorraad'
+import { getActor, actorCanSee } from '@/lib/actor-modules'
+import { TodayPanel } from './today-panel'
+import { RecentActivity } from './recent-activity'
+import { OpvolgingPanel } from './opvolging-panel'
+import { TakenBlok } from '@/components/admin/taken-blok'
+import { MailProjecten } from '@/components/admin/mail-projecten'
+import { magIk, leesInstellingen } from '@/lib/instellingen/laden'
+import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { mijnDeadlines } from '@/lib/agenda/deadlines-server'
+import { DeadlinesBlok } from './agenda/deadlines-blok'
+import { SnelleAgendaKnoppen } from './agenda/inspreken'
+import { TeClassificeren } from '@/components/admin/te-classificeren'
+import { aantalTeClassificeren } from '@/lib/bedrijven/server'
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    ready_for_review: 'bg-amber-100 text-amber-700',
-    changes_requested: 'bg-red-100 text-red-700',
-    approved: 'bg-green-100 text-green-700',
-    draft: 'bg-gray-100 text-gray-600',
-    sent: 'bg-blue-100 text-blue-700',
-    signed: 'bg-green-100 text-green-700',
-    new: 'bg-blue-100 text-blue-700',
-    in_review: 'bg-amber-100 text-amber-700',
-    open: 'bg-orange-100 text-orange-700',
-    invited: 'bg-purple-100 text-purple-700',
-  }
-  const labels: Record<string, string> = {
-    ready_for_review: 'Bij klant',
-    changes_requested: 'Feedback',
-    approved: 'Goedgekeurd',
-    draft: 'Concept',
-    sent: 'Verstuurd',
-    signed: 'Getekend',
-    new: 'Nieuw',
-    in_review: 'In review',
-    open: 'Open',
-    invited: 'Uitgenodigd',
-  }
-  return (
-    <span className={`status-badge ${map[status] ?? 'bg-gray-100 text-gray-500'}`}>
-      {labels[status] ?? status}
-    </span>
-  )
+/** Te classificeren (verbeterplan fase 1): enkel een telling hier; de lijst laadt pas bij het openklappen. */
+async function TeClassificerenBlok() {
+  const aantal = await aantalTeClassificeren()
+  return aantal > 0 ? <TeClassificeren aantal={aantal} /> : null
 }
 
-function SectionHeader({ title, count, href }: { title: string; count?: number; href?: string }) {
-  return (
-    <div className="flex items-center justify-between mb-3">
-      <h2 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
-        {title}
-        {count !== undefined && (
-          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
-            {count}
-          </span>
-        )}
-      </h2>
-      {href && (
-        <Link href={href} className="text-xs text-gray-400 hover:text-black flex items-center gap-1">
-          Alles <ArrowRight className="h-3 w-3" />
-        </Link>
-      )}
-    </div>
-  )
+/** Jouw deadlines van vandaag (en wat de voorbije week niet af raakte). Niets = geen blok. */
+async function AgendaDeadlines({ userId }: { userId: string }) {
+  const [lijst, aanpassen] = await Promise.all([
+    mijnDeadlines(createAdminSupabaseClient(), userId).catch(() => []),
+    magIk('agenda', 'aanpassen'),
+  ])
+  return <DeadlinesBlok begin={lijst} magAanpassen={!!aanpassen} />
 }
 
-export default async function CommandCenter() {
-  let supabaseAdmin: Awaited<ReturnType<typeof createAdminSupabaseClient>> | null = null
-  try {
-    supabaseAdmin = createAdminSupabaseClient()
-  } catch {
-    // No service role key configured
-  }
-
-  const supabase = await createClient()
-
+// Compact Command Center: wat beslist moet worden (nieuwe projecten), taken,
+// Op te volgen (enkel blokken waar iets in staat, dringendste eerst) en wat
+// daar niet al in staat. Recente activiteit ingeklapt onderaan. Het vroegere
+// contractenblok met tellers staat niet meer hier: de opvolging zit in
+// "Op te volgen", de cijfers in Klantcontracten. Notificaties leven in het globale belletje. De zware module-
+// widgets (finance/lifecycle/blogs/framer/scripts) zijn verplaatst naar hun
+// eigen modules — niet verwijderd, enkel niet meer op het dashboard.
+//
+// BELANGRIJK: dit scherm is niet per module afgeschermd door de middleware
+// (iedereen mag /admin), dus filteren we hier zelf. Een appointment setter met
+// enkel de Verkoop-module hoort hier geen klanten, contracten of facturen te
+// zien — die ziet enkel zijn eigen pipeline.
+export default async function CommandCenter({ searchParams }: { searchParams?: { tab?: string; deel?: string } }) {
   const today = new Date()
-  const todayISO = today.toISOString().slice(0, 10)
-  const in14ISO = new Date(today.getTime() + 14 * 86400000).toISOString().slice(0, 10)
-
-  let clients: Array<{
-    id: string
-    company_name: string
-  }> = []
-  let pendingScripts: Array<{
-    id: string
-    client_id: string
-    title: string
-    platform: string
-    planned_date: string
-    status: string
-    client_name?: string
-  }> = []
-  let rejectedScripts: typeof pendingScripts = []
-  let pendingContracts: Array<{
-    id: string
-    title: string
-    status: string
-    created_at: string
-    client_name?: string
-  }> = []
-  let openWebdesign: Array<{
-    id: string
-    client_id: string
-    title: string
-    status: string
-    kind: string
-    created_at: string
-    client_name?: string
-  }> = []
-  let openAssignments: Array<{
-    id: string
-    title: string
-    service_slug: string | null
-    status: string
-    client_id: string | null
-    deadline: string | null
-    freelancer_id: string | null
-    client_name?: string
-  }> = []
-  let expiringContracts: Array<{
-    id: string
-    client_id: string
-    service_slug: string
-    end_date: string
-    daysLeft: number
-    client_name?: string
-  }> = []
-
-  if (supabaseAdmin) {
-    const db = supabaseAdmin
-    const [
-      clientsRes,
-      pendingScriptsRes,
-      rejectedScriptsRes,
-      pendingContractsRes,
-      openWebdesignRes,
-      openAssignmentsRes,
-      serviceContractsRes,
-    ] = await Promise.all([
-      db.from('clients').select('id, company_name'),
-      db.from('social_content_items')
-        .select('id, client_id, title, platform, planned_date, status')
-        .eq('status', 'ready_for_review')
-        .order('planned_date', { ascending: true })
-        .limit(20),
-      db.from('social_content_items')
-        .select('id, client_id, title, platform, planned_date, status, client_feedback')
-        .eq('status', 'changes_requested')
-        .order('created_at', { ascending: false })
-        .limit(20),
-      db.from('contracts')
-        .select('id, title, status, created_at, client_id')
-        .in('status', ['sent'])
-        .order('created_at', { ascending: false })
-        .limit(10),
-      db.from('webdesign_change_requests')
-        .select('id, client_id, title, status, kind, created_at')
-        .in('status', ['new', 'in_review'])
-        .order('created_at', { ascending: false })
-        .limit(10),
-      db.from('freelancer_assignments')
-        .select('id, title, service_slug, status, client_id, deadline, freelancer_id')
-        .in('status', ['open', 'in_progress'])
-        .order('created_at', { ascending: false })
-        .limit(10),
-      db.from('service_contracts')
-        .select('id, client_id, service_slug, end_date')
-        .not('end_date', 'is', null)
-        .order('end_date', { ascending: true })
-        .limit(30),
-    ])
-
-    clients = (clientsRes.data ?? []) as typeof clients
-    const cmap = new Map(clients.map((c) => [c.id, c.company_name]))
-    const enrich = <T extends { client_id: string | null }>(arr: T[] | null) =>
-      (arr ?? []).map((r) => ({
-        ...r,
-        client_name: r.client_id ? cmap.get(r.client_id) ?? '—' : '—',
-      }))
-
-    pendingScripts = enrich(pendingScriptsRes.data)
-    rejectedScripts = enrich(rejectedScriptsRes.data as typeof pendingScripts)
-    pendingContracts = enrich(pendingContractsRes.data as Array<{ id: string; title: string; status: string; created_at: string; client_id: string | null }>)
-    openWebdesign = enrich(openWebdesignRes.data)
-    openAssignments = enrich(openAssignmentsRes.data as typeof openAssignments)
-
-    // Service contracts expiry
-    const todayMs = Date.now()
-    expiringContracts = ((serviceContractsRes.data ?? []) as Array<{ id: string; client_id: string; service_slug: string; end_date: string }>)
-      .map((sc) => {
-        const end = new Date(sc.end_date)
-        const daysLeft = Math.round((end.getTime() - todayMs) / 86400000)
-        return { ...sc, daysLeft, client_name: cmap.get(sc.client_id) ?? '—' }
-      })
-      .filter((sc) => sc.daysLeft <= 90) // only show contracts expiring within 90 days (or expired)
-      .sort((a, b) => a.daysLeft - b.daysLeft)
-  } else {
-    const clientsRes = await supabase.from('clients').select('id, company_name')
-    clients = (clientsRes.data ?? []) as typeof clients
-  }
-
-  const renewalClients: typeof clients = []
-
-  const totalPending = pendingScripts.length + rejectedScripts.length
-  const totalAlerts = renewalClients.length + pendingContracts.length + totalPending
+  const actor = await getActor()
+  const can = (key: string) => !!actor && actorCanSee(actor, key)
+  const isAdmin = !!actor?.isAdmin
+  const ritme = isAdmin && searchParams?.tab === 'ritme'
+  const [agendaToevoegen, meetingsPlannen, inst] = await Promise.all([
+    can('agenda') ? magIk('agenda', 'toevoegen') : null,
+    can('meetings') ? magIk('meetings', 'toevoegen') : null,
+    isAdmin ? leesInstellingen() : null,
+  ])
+  // Tijdens het vaste weekoverleg: één regel bovenaan die het overleg opent.
+  const brussel = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Brussels', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(today)
+  const dagNr = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(brussel.find((p) => p.type === 'weekday')?.value ?? '') + 1
+  const uurNu = `${brussel.find((p) => p.type === 'hour')?.value ?? '00'}:${brussel.find((p) => p.type === 'minute')?.value ?? '00'}`
+  const overlegNu = !!inst && overlegLoopt(inst.werking, dagNr, uurNu)
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Command Center</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          {today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">Command Center</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Brussels' })}
+          </p>
+        </div>
+        {/* Snel: een taak inspreken (komt in de agenda) of een meeting inplannen. */}
+        <SnelleAgendaKnoppen magToevoegen={!!agendaToevoegen} magMeetings={!!meetingsPlannen} />
       </div>
 
-      {/* Quick stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="stat-card">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Klanten</span>
-            <Users className="h-4 w-4 text-gray-400" />
+      {/* Ritme (fase 7): scorecard, weekoverleg, doelen, beslissingen en beloftes als tabblad, enkel voor de zaakvoerders. */}
+      {isAdmin && (
+        <div className="flex gap-1">
+          {([['', 'Vandaag'], ['ritme', 'Ritme']] as const).map(([k, l]) => (
+            <Link key={k} href={k ? `/admin?tab=${k}` : '/admin'} prefetch={false} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${ritme === !!k ? 'bg-black text-white' : 'bg-white border border-gray-200 text-gray-700'}`}>{l}</Link>
+          ))}
+        </div>
+      )}
+      {overlegNu && !(ritme && searchParams?.deel === 'overleg') && (
+        <Link href="/admin?tab=ritme&deel=overleg" prefetch={false} className="card-base flex items-center gap-2 text-sm font-medium hover:bg-gray-50">
+          <span className="h-2 w-2 rounded-full bg-black" aria-hidden />Het weekoverleg loopt nu<span className="flex-1" /><span className="text-gray-500">Openen →</span>
+        </Link>
+      )}
+      {ritme ? <RitmeClient start={searchParams?.deel} /> : <>
+
+      {/* Jouw deadlines van vandaag, het uur groot vooraan. */}
+      {actor && can('agenda') && (
+        <Suspense fallback={null}>
+          <AgendaDeadlines userId={actor.userId} />
+        </Suspense>
+      )}
+
+      {/* Nieuwe projecten uit de mail: Ja (projectkaart) of Nee. Enkel als er iets te beslissen is. */}
+      {can('opdrachten') && <MailProjecten />}
+
+      {/* Taken aan elkaar toewijzen, gesynchroniseerd met ClickUp. */}
+      {actor && <TakenBlok />}
+
+      {/* Te classificeren: records zonder zeker bedrijf of dienst (zaakvoerders). */}
+      {isAdmin && (
+        <Suspense fallback={null}>
+          <TeClassificerenBlok />
+        </Suspense>
+      )}
+
+      {/* Op te volgen — bovenaan: concreet wie en wat, per module afgeschermd. */}
+      <Suspense fallback={<div className="card-base text-sm text-gray-400">Opvolging laden…</div>}>
+        <OpvolgingPanel modules={actor?.modules ?? null} userId={actor?.userId ?? null} />
+      </Suspense>
+
+      {/* Vandaag — enkel wat niet al bij "Op te volgen" staat (blogs, websitefeedback, klanttaken). */}
+      <Suspense fallback={null}>
+        <TodayPanel modules={actor?.modules ?? null} />
+      </Suspense>
+
+      {/* Werkvoorraad per bedrijf (fase 7): weken getekend werk. */}
+      {isAdmin && <WerkvoorraadBlok />}
+
+      {/* Recente activiteit — ingeklapt onderaan: nuttig om iets terug te vinden, geen dagelijkse actie. Admin-only (audit-log). */}
+      {isAdmin && (
+        <details className="card-base group">
+          <summary className="cursor-pointer list-none text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <span className="text-gray-400 group-open:rotate-90 transition-transform">›</span>Recente activiteit
+          </summary>
+          <div className="mt-3">
+            <Suspense fallback={<div className="text-sm text-gray-400">Laden…</div>}>
+              <RecentActivity kaal />
+            </Suspense>
           </div>
-          <div className="text-2xl font-bold">{clients.length}</div>
-          <div className="text-xs text-gray-400 mt-1">Actief</div>
-        </div>
-        <div className="stat-card">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Scripts</span>
-            <Clock className="h-4 w-4 text-amber-500" />
-          </div>
-          <div className="text-2xl font-bold text-amber-600">{pendingScripts.length}</div>
-          <div className="text-xs text-gray-400 mt-1">Wachten op goedkeuring</div>
-        </div>
-        <div className="stat-card">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Feedback</span>
-            <AlertTriangle className="h-4 w-4 text-red-500" />
-          </div>
-          <div className="text-2xl font-bold text-red-600">{rejectedScripts.length}</div>
-          <div className="text-xs text-gray-400 mt-1">Aanpassing gevraagd</div>
-        </div>
-        <div className="stat-card">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Meldingen</span>
-            <Bell className="h-4 w-4 text-gray-400" />
-          </div>
-          <div className="text-2xl font-bold">{totalAlerts}</div>
-          <div className="text-xs text-gray-400 mt-1">Actievereist</div>
-        </div>
-      </div>
-
-      <div className="grid lg:grid-cols-2 gap-6">
-        {/* Scripts pending review */}
-        <div className="card-base">
-          <SectionHeader
-            title="Scripts — bij klant"
-            count={pendingScripts.length}
-            href="/admin/services/social-media"
-          />
-          {pendingScripts.length === 0 ? (
-            <div className="text-sm text-gray-400 py-4 text-center">Geen scripts wachten op review</div>
-          ) : (
-            <div className="space-y-2">
-              {pendingScripts.slice(0, 8).map((item) => (
-                <Link
-                  key={item.id}
-                  href={`/admin/services/social-media?client=${item.client_id}`}
-                  className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors group"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate">{item.title}</div>
-                    <div className="text-xs text-gray-400">
-                      {item.client_name} · {item.platform} · {formatDate(item.planned_date)}
-                    </div>
-                  </div>
-                  <span className="status-badge bg-amber-100 text-amber-700 shrink-0 ml-2">
-                    Bij klant
-                  </span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Scripts with feedback */}
-        <div className="card-base">
-          <SectionHeader
-            title="Scripts — feedback gevraagd"
-            count={rejectedScripts.length}
-            href="/admin/services/social-media"
-          />
-          {rejectedScripts.length === 0 ? (
-            <div className="text-sm text-gray-400 py-4 text-center">Geen openstaande feedback</div>
-          ) : (
-            <div className="space-y-2">
-              {rejectedScripts.slice(0, 8).map((item) => (
-                <Link
-                  key={item.id}
-                  href={`/admin/services/social-media?client=${item.client_id}`}
-                  className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate">{item.title}</div>
-                    <div className="text-xs text-gray-400">
-                      {item.client_name} · {item.platform} · {formatDate(item.planned_date)}
-                    </div>
-                  </div>
-                  <span className="status-badge bg-red-100 text-red-700 shrink-0 ml-2">
-                    Feedback
-                  </span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Pending contracts */}
-        <div className="card-base">
-          <SectionHeader
-            title="Contracten — wachten"
-            count={pendingContracts.length}
-            href="/admin/contracts"
-          />
-          {pendingContracts.length === 0 ? (
-            <div className="text-sm text-gray-400 py-4 text-center">Geen openstaande contracten</div>
-          ) : (
-            <div className="space-y-2">
-              {pendingContracts.map((c) => (
-                <Link
-                  key={c.id}
-                  href={`/admin/contracts/${c.id}`}
-                  className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate">{c.title}</div>
-                    <div className="text-xs text-gray-400">
-                      {c.client_name ?? '—'} · {formatDate(c.created_at)}
-                    </div>
-                  </div>
-                  <StatusBadge status={c.status} />
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Website requests */}
-        <div className="card-base">
-          <SectionHeader
-            title="Website onderhoudsvragen"
-            count={openWebdesign.length}
-            href="/admin/services/website"
-          />
-          {openWebdesign.length === 0 ? (
-            <div className="text-sm text-gray-400 py-4 text-center">Geen open onderhoudsvragen</div>
-          ) : (
-            <div className="space-y-2">
-              {openWebdesign.map((item) => (
-                <Link
-                  key={item.id}
-                  href="/admin/services/website"
-                  className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate">{item.title}</div>
-                    <div className="text-xs text-gray-400">{item.client_name} · {item.kind}</div>
-                  </div>
-                  <StatusBadge status={item.status} />
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Contract expiry */}
-        <div className="card-base">
-          <SectionHeader
-            title="Contracten die aflopen"
-            count={expiringContracts.length}
-            href="/admin/clients"
-          />
-          {expiringContracts.length === 0 ? (
-            <div className="text-sm text-gray-400 py-4 text-center">Geen contracten die binnenkort aflopen</div>
-          ) : (
-            <div className="space-y-2">
-              {expiringContracts.slice(0, 8).map((sc) => {
-                const isExpired = sc.daysLeft < 0
-                const isCritical = !isExpired && sc.daysLeft <= 14
-                const isWarning = !isExpired && !isCritical && sc.daysLeft <= 30
-                const badgeCls = isExpired ? 'bg-red-100 text-red-700' : isCritical ? 'bg-red-50 text-red-600' : isWarning ? 'bg-amber-100 text-amber-700' : 'bg-yellow-50 text-yellow-700'
-                return (
-                  <Link
-                    key={sc.id}
-                    href={`/admin/clients?q=${encodeURIComponent(sc.client_name ?? '')}`}
-                    className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-gray-900 truncate">{sc.client_name}</div>
-                      <div className="text-xs text-gray-400 capitalize">{sc.service_slug?.replace(/-/g, ' ')}</div>
-                    </div>
-                    <span className={`status-badge shrink-0 ml-2 ${badgeCls}`}>
-                      {isExpired ? `${Math.abs(sc.daysLeft)}d verlopen` : `${sc.daysLeft}d resterend`}
-                    </span>
-                  </Link>
-                )
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Open assignments */}
-        <div className="card-base">
-          <SectionHeader
-            title="Openstaande opdrachten"
-            count={openAssignments.length}
-            href="/admin/assignments"
-          />
-          {openAssignments.length === 0 ? (
-            <div className="text-sm text-gray-400 py-4 text-center">Geen openstaande opdrachten</div>
-          ) : (
-            <div className="space-y-2">
-              {openAssignments.map((item) => (
-                <Link
-                  key={item.id}
-                  href="/admin/assignments"
-                  className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate">{item.title}</div>
-                    <div className="text-xs text-gray-400">
-                      {item.client_name}
-                      {item.deadline ? ` · ${formatDate(item.deadline)}` : ''}
-                    </div>
-                  </div>
-                  <StatusBadge status={item.status} />
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+        </details>
+      )}
+      </>}
     </div>
   )
 }

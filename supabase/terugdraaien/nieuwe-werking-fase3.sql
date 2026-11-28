@@ -1,0 +1,9 @@
+-- Terugdraaien nieuwe werking fase 3 (28 nov 2026). Enkel uitvoeren als het echt moet.
+-- Alles is additief: oude schermen lezen deze kolommen en tabellen niet, dus laten staan is veilig.
+-- Wil je het rapport toch uit de app, zet dan de code terug naar de commit van vóór fase 3.
+-- De tabellen weghalen gooit de rapporten weg; doe dat enkel na een export:
+-- COPY (SELECT * FROM ngs_audit_processen) TO STDOUT WITH CSV HEADER;
+-- COPY (SELECT * FROM ngs_workflows) TO STDOUT WITH CSV HEADER;
+-- ALTER TABLE ngs_user_stories DROP COLUMN IF EXISTS workflow_id;
+-- DROP TABLE IF EXISTS ngs_audit_processen;
+-- DROP TABLE IF EXISTS ngs_workflows;

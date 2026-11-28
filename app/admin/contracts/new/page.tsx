@@ -3,18 +3,41 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ChevronLeft, Loader2, Upload } from 'lucide-react'
+import { readJson, pdfTeGroot, MAX_PDF_MB } from '@/lib/upload'
+import { laadContractPdfOp } from '@/lib/contracten/pdf-opladen'
+import { DURATION_TYPES } from '@/lib/contract-status'
+import { ContracttypeKiezer } from '../contracttype-kiezer'
+import { KlantKiezer, vulOndertekenaar, type KlantOptie } from '@/components/admin/klant-kiezer'
+import { VerantwoordelijkeKiezer } from '@/components/admin/verantwoordelijke-kiezer'
+import { BedrijfKiezer } from '@/components/admin/bedrijf-kiezer'
+import { SERVICE_SLUG_NAAR_DIENST, STANDAARD_DIENSTEN } from '@/lib/bedrijven/model'
+import type { ContractVerantwoordelijke } from '@/lib/contracten/verantwoordelijke'
 
 export default function NewContractPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [clients, setClients] = useState<Array<{ id: string; company_name: string }>>([])
+  const [clients, setClients] = useState<KlantOptie[] | null>(null)
   const [file, setFile] = useState<File | null>(null)
+  // Wie volgt het contract op en tekent namens ons tegen (verplicht). Voorstel uit de kaart of de klant.
+  const [verantwoordelijke, setVerantwoordelijke] = useState<ContractVerantwoordelijke | null>(null)
+  const [zelfGekozen, setZelfGekozen] = useState(false)
+  // Voor welk bedrijf (verbeterplan fase 1): verplicht. Voorstel uit de projectkaart of de dienst.
+  const [bedrijf, setBedrijf] = useState<string | null>(null)
+  const [bedrijfZelf, setBedrijfZelf] = useState(false)
+  const now = new Date()
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   const [form, setForm] = useState({
     client_id: '',
     title: '',
+    contract_type: '',
+    duration_type: '12m',
     service_slug: '',
     signer_name: '',
     signer_email: '',
+    already_signed: false,
+    signed_at: now.toISOString().slice(0, 10),
+    start_month: thisMonth,
+    duration_months: '12',
   })
 
   useEffect(() => {
@@ -25,26 +48,62 @@ export default function NewContractPage() {
       .catch(() => setClients([]))
   }, [])
 
+  // Deep-link vanuit een klantmap: /admin/contracts/new?client=<id> (of ?client_id=).
+  // Bewust via window.location i.p.v. useSearchParams — dat laatste vraagt een
+  // Suspense-grens in een clientpagina.
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search)
+      const vooraf = sp.get('client') || sp.get('client_id') || ''
+      if (/^[0-9a-f-]{36}$/i.test(vooraf)) setForm((p) => (p.client_id ? p : { ...p, client_id: vooraf }))
+    } catch { /* geen querystring */ }
+  }, [])
+
+  useEffect(() => {
+    if (zelfGekozen) return
+    let opdracht = ''
+    try { opdracht = new URLSearchParams(window.location.search).get('opdracht') ?? '' } catch { /* geen querystring */ }
+    const q = new URLSearchParams({ ...(form.client_id ? { client: form.client_id } : {}), ...(/^[0-9a-f-]{36}$/i.test(opdracht) ? { opdracht } : {}) })
+    if (!q.toString()) return
+    fetch(`/api/admin/contracts/verantwoordelijke?${q}`, { cache: 'no-store' })
+      .then((r) => r.json()).then((j) => { if (j.voorstel) setVerantwoordelijke(j.voorstel); if (j.bedrijf) setBedrijf((b) => b ?? j.bedrijf) }).catch(() => null)
+  }, [form.client_id, zelfGekozen])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!file) { setError('Selecteer een PDF-bestand'); return }
+    if (!verantwoordelijke) { setError('Kies wie verantwoordelijk is voor dit contract.'); return }
+    if (!bedrijf) { setError('Kies voor welk bedrijf dit contract is: NextGen Media of NextGen Solutions.'); return }
+    if (!form.contract_type) { setError('Contracttype is verplicht'); return }
+    if (pdfTeGroot(file)) { setError(`PDF te groot — max ${MAX_PDF_MB} MB. Comprimeer het bestand en probeer opnieuw.`); return }
     setLoading(true)
     setError(null)
 
     try {
+      // De pdf gaat rechtstreeks naar de opslag (tot 10 MB); het aanmaken haalt hem daar op.
+      const pad = await laadContractPdfOp(file)
       const fd = new FormData()
-      fd.append('pdf', file)
+      fd.append('pdf_pad', pad)
       fd.append('client_id', form.client_id)
       fd.append('title', form.title)
+      fd.append('contract_type', form.contract_type)
+      fd.append('duration_type', form.duration_type)
       fd.append('service_slug', form.service_slug)
       fd.append('signer_name', form.signer_name)
       fd.append('signer_email', form.signer_email)
+      fd.append('already_signed', String(form.already_signed))
+      fd.append('start_month', form.start_month)
+      fd.append('verantwoordelijke', verantwoordelijke)
+      fd.append('bedrijf', bedrijf)
+      // Vanaf een projectkaart (?opdracht=<id>): het contract hangt aan die kaart.
+      try { const op = new URLSearchParams(window.location.search).get('opdracht'); if (op && /^[0-9a-f-]{36}$/i.test(op)) fd.append('opdracht_id', op) } catch { /* geen querystring */ }
+      fd.append('duration_months', form.duration_months)
+      if (form.already_signed) fd.append('signed_at', form.signed_at)
 
       const res = await fetch('/api/admin/contracts', { method: 'POST', body: fd })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error)
+      const json = await readJson(res)
       // Hard redirect — guarantees the contracts list shows the new contract
-      window.location.href = `/admin/contracts/${json.id}`
+      window.location.href = `/admin/contracts/${json.id as string}`
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Fout')
     } finally {
@@ -62,26 +121,54 @@ export default function NewContractPage() {
           <ChevronLeft className="h-4 w-4" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold">Nieuw contract</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Nieuw contract</h1>
           <p className="text-sm text-gray-500">Upload een PDF-contract en koppel aan klant</p>
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="card-base space-y-4">
         <div>
-          <label className={lbl}>Klant *</label>
-          <select required className={inp} value={form.client_id} onChange={(e) => setForm((p) => ({ ...p, client_id: e.target.value }))}>
-            <option value="">— Selecteer klant —</option>
-            {clients.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-          </select>
+          <label className={lbl} htmlFor="contract-klant">Klant (optioneel)</label>
+          <KlantKiezer id="contract-klant" klanten={clients} waarde={form.client_id} leegLabel="Geen klant (los/intern contract)" bron="contract"
+            onNieuw={(k) => setClients((l) => [...(l ?? []), k])}
+            onKies={(k) => setForm((p) => {
+              const o = vulOndertekenaar({ naam: p.signer_name, email: p.signer_email }, clients?.find((c) => c.id === p.client_id), k)
+              return { ...p, client_id: k?.id ?? '', signer_name: o.naam, signer_email: o.email }
+            })} />
+          <p className="text-xs text-gray-400 mt-1">Zonder klant verschijnt het contract niet in een klantportaal — enkel intern + via de publieke tekenlink.</p>
+        </div>
+        <div>
+          <span className={lbl} id="nieuw-bedrijf-label">Bedrijf *</span>
+          <BedrijfKiezer id="nieuw-bedrijf" waarde={bedrijf} onChange={(v) => { setBedrijf(v); setBedrijfZelf(true) }} />
+        </div>
+        <div>
+          <span className={lbl} id="nieuw-verantwoordelijke-label">Verantwoordelijke *</span>
+          <VerantwoordelijkeKiezer id="nieuw-verantwoordelijke" waarde={verantwoordelijke} onChange={(v) => { setVerantwoordelijke(v); setZelfGekozen(true) }} />
+          <p className="text-xs text-gray-400 mt-1">Volgt het contract op en tekent namens ons tegen zodra de klant getekend heeft.</p>
         </div>
         <div>
           <label className={lbl}>Contracttitel *</label>
           <input required className={inp} value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="Social Media Contract 2025" />
         </div>
         <div>
+          <label className={lbl} htmlFor="contract-type">Contracttype *</label>
+          <ContracttypeKiezer
+            id="contract-type"
+            verplicht
+            waarde={form.contract_type}
+            onWijzig={(v) => setForm((p) => ({ ...p, contract_type: v }))}
+          />
+          <p className="text-xs text-gray-400 mt-1">Kies een bestaand type of tik een nieuw type in.</p>
+        </div>
+        <div>
           <label className={lbl}>Dienst (voor portaaltoegang)</label>
-          <select className={inp} value={form.service_slug} onChange={(e) => setForm((p) => ({ ...p, service_slug: e.target.value }))}>
+          <select className={inp} value={form.service_slug} onChange={(e) => {
+            const v = e.target.value
+            setForm((p) => ({ ...p, service_slug: v }))
+            // De dienst zegt het bedrijf, tenzij je het zelf al koos.
+            const dienst = STANDAARD_DIENSTEN.find((x) => x.slug === SERVICE_SLUG_NAAR_DIENST[v])
+            if (dienst && !bedrijfZelf) setBedrijf(dienst.bedrijf)
+          }}>
             <option value="">— Geen koppeling —</option>
             <option value="social-media">Social Media Management</option>
             <option value="webdesign">Website</option>
@@ -92,7 +179,7 @@ export default function NewContractPage() {
           </select>
           <p className="text-xs text-gray-400 mt-1">Als dit contract getekend wordt, kan de admin portaaltoegang verlenen voor deze dienst.</p>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className={lbl}>Naam ondertekenaar</label>
             <input className={inp} value={form.signer_name} onChange={(e) => setForm((p) => ({ ...p, signer_name: e.target.value }))} placeholder="Jan Janssen" />
@@ -102,9 +189,57 @@ export default function NewContractPage() {
             <input type="email" className={inp} value={form.signer_email} onChange={(e) => setForm((p) => ({ ...p, signer_email: e.target.value }))} placeholder="jan@bedrijf.be" />
           </div>
         </div>
+
+        {/* Contractduur */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className={lbl}>Contractduur</label>
+            <select className={inp} value={form.duration_type} onChange={(e) => setForm((p) => ({ ...p, duration_type: e.target.value }))}>
+              {DURATION_TYPES.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+            </select>
+          </div>
+          {/* Startmaand enkel relevant als er een looptijd is (niet bij eenmalig) */}
+          {form.duration_type !== 'eenmalig' && (
+            <div>
+              <label className={lbl}>Startmaand</label>
+              <input type="month" className={inp} value={form.start_month} onChange={(e) => setForm((p) => ({ ...p, start_month: e.target.value }))} />
+            </div>
+          )}
+          {/* Aangepast: optioneel aantal maanden */}
+          {form.duration_type === 'aangepast' && (
+            <div>
+              <label className={lbl}>Aantal maanden (optioneel)</label>
+              <input type="number" min="0" className={inp} value={form.duration_months} onChange={(e) => setForm((p) => ({ ...p, duration_months: e.target.value }))} placeholder="bv. 18" />
+            </div>
+          )}
+        </div>
+
+        {/* Reeds getekend toggle */}
+        <div className="rounded-xl border border-gray-200 p-4 space-y-3">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.already_signed}
+              onChange={(e) => setForm((p) => ({ ...p, already_signed: e.target.checked }))}
+              className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-gray-900"
+            />
+            <div>
+              <div className="text-sm font-medium text-gray-900">Dit contract is al getekend</div>
+              <div className="text-xs text-gray-500 mt-0.5">
+                Voor bestaande klanten die offline/eerder al tekenden. De PDF verschijnt meteen als getekend in hun portaal.
+              </div>
+            </div>
+          </label>
+          {form.already_signed && (
+            <div>
+              <label className={lbl}>Getekend op</label>
+              <input type="date" className={inp} value={form.signed_at} onChange={(e) => setForm((p) => ({ ...p, signed_at: e.target.value }))} />
+            </div>
+          )}
+        </div>
         <div>
           <label className={lbl}>PDF-contract *</label>
-          <label className="flex flex-col items-center justify-center gap-2 p-6 border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-[#fff848] transition-colors">
+          <label className="flex flex-col items-center justify-center gap-2 p-6 border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-gray-900 transition-colors">
             <Upload className="h-6 w-6 text-gray-400" />
             <span className="text-sm text-gray-500">
               {file ? file.name : 'Klik om PDF te selecteren'}

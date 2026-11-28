@@ -1,0 +1,52 @@
+// Merkkleuren voor de verkoopmodule. GEEN 'server-only': dit wordt ook in
+// client-componenten gebruikt (badges in pipeline, agenda en Focus Mode).
+//
+// Waarom dit bestaat: met twee merken in één scherm moet je in een oogopslag
+// zien waarvoor je aan het bellen of boeken bent. Woud (groen) = NextGenMedia,
+// blauw = NextGenSolutions. De kleuren
+// hangen aan de pipeline-KEY, niet aan de naam — namen kunnen wijzigen.
+
+export type MerkStijl = {
+  /** Tailwind-klassen voor een badge: achtergrond, rand en tekst. */
+  badge: string
+  /** Een klein bolletje/accent, bv. in een keuzelijst. */
+  stip: string
+  /** Volle balk (bv. bovenrand van Focus Mode). */
+  balk: string
+}
+
+const NEUTRAAL: MerkStijl = {
+  badge: 'bg-gray-100 border-gray-300 text-gray-700',
+  stip: 'bg-gray-400',
+  balk: 'bg-gray-300',
+}
+
+const STIJLEN: Record<string, MerkStijl> = {
+  nextgenmedia: {
+    // Woud uit de huisstijl van NextGenMedia (lib/ngm-merk.ts), nooit geel.
+    badge: 'bg-[#0C2B1E] border-[#0C2B1E] text-white',
+    stip: 'bg-[#0C2B1E] border border-[#0C2B1E]',
+    balk: 'bg-[#0C2B1E]',
+  },
+  nextgensolutions: {
+    badge: 'bg-blue-500 border-blue-600 text-white',
+    stip: 'bg-blue-500',
+    balk: 'bg-blue-500',
+  },
+}
+
+/** Stijl voor een merk. Onbekende/lege key → neutraal grijs. */
+export function merkStijl(pipelineKey: string | null | undefined): MerkStijl {
+  return STIJLEN[pipelineKey ?? ''] ?? NEUTRAAL
+}
+
+/**
+ * Kleur van het afspraakblok in Google Calendar, passend bij de mappen in
+ * ClickUp: geel = NextGenMedia, blauw = NextGenSolutions. Google werkt met
+ * vaste kleurnummers: 5 = geel ("Banana"), 9 = blauw ("Blueberry").
+ */
+export function googleKleurId(pipelineKey: string | null | undefined): string | null {
+  if (pipelineKey === 'nextgenmedia') return '5'
+  if (pipelineKey === 'nextgensolutions') return '9'
+  return null
+}

@@ -1,0 +1,31 @@
+{
+  "regions": [
+    "dub1"
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/blog-generate",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/metricool-daily?slot=a",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/metricool-daily?slot=b",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/maintenance-reminder",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/personeel",
+      "schedule": "30 5 * * *"
+    },
+    {
+      "path": "/api/cron/mail-opvolging",
+      "schedule": "0 5,8,11,14,17 * * *"
+    }
+  ]
+}

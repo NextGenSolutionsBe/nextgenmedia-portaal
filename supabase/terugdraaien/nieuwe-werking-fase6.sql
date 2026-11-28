@@ -1,0 +1,5 @@
+-- Terugdraaien nieuwe werking fase 6 (28 nov 2026). Enkel uitvoeren als het echt moet.
+-- Monitoring stoppen (de checks blijven staan):
+-- SELECT cron.unschedule('care-monitoring');
+-- Een Care-factuur stoppen = de maandreeks in Facturen stopzetten (niet wissen).
+-- Alle kolommen en tabellen zijn additief en mogen blijven staan; oude schermen lezen ze niet.

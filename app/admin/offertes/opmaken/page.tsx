@@ -1,0 +1,25 @@
+import { FileSignature } from 'lucide-react'
+import { OfferteOpmaken } from './opmaken-client'
+import { leesInstellingen } from '@/lib/instellingen/laden'
+
+export const dynamic = 'force-dynamic'
+
+/**
+ * Offerte opmaken: klant kiezen, algemene gegevens, enkel de fiches van de
+ * diensten die je aanbiedt, het prijsblok. De server maakt er een nette pdf
+ * van; versturen gaat daarna via de mail met voorbeeld, zoals elke offerte.
+ * ?client=… en ?opdracht=… vullen klant en project in; ?id=… past een concept aan.
+ */
+export default async function OfferteOpmakenPagina({ searchParams }: { searchParams?: { client?: string; opdracht?: string; id?: string } }) {
+  // Migratie naar een ander platform (Care, nieuwe werking fase 6): het vanaf-bedrag uit Instellingen → Werking.
+  const migratie = await leesInstellingen().then((i) => i.werking.care.migratie_vanaf).catch(() => null)
+  return (
+    <div className="space-y-5 animate-fade-in">
+      <div>
+        <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2"><FileSignature className="h-6 w-6" />{searchParams?.id ? 'Offerte aanpassen' : 'Offerte opmaken'}</h1>
+        <p className="text-sm text-gray-500 mt-0.5">Je ziet eerst een voorbeeld. Er vertrekt niets tot je de mail verstuurt.</p>
+      </div>
+      <OfferteOpmaken beginKlant={searchParams?.client ?? null} opdrachtId={searchParams?.opdracht ?? null} offerteId={searchParams?.id ?? null} migratieVanaf={migratie} />
+    </div>
+  )
+}

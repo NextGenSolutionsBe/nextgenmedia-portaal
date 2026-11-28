@@ -2,96 +2,338 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 @layer base {
+  /* Rasteritems krimpen mee met hun kolom. Zonder dit duwt één brede tabel of
+     lange URL een kolom breder dan het scherm (min-width: auto). */
+  .grid > * {
+    min-width: 0;
+  }
   :root {
+    /* NextGen-huisstijl, monochroom: #0f0f0f · #272727 · #4b4b4b · #e0e0e0 · #ffffff */
     --background: 0 0% 100%;
-    --foreground: 0 0% 4%;
+    --foreground: 0 0% 6%;
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 4%;
+    --card-foreground: 0 0% 6%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 4%;
-    --primary: 56 100% 64%;
-    --primary-foreground: 0 0% 0%;
+    --popover-foreground: 0 0% 6%;
+    --primary: 0 0% 6%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 0 0% 96%;
-    --secondary-foreground: 0 0% 10%;
+    --secondary-foreground: 0 0% 15%;
     --muted: 0 0% 96%;
-    --muted-foreground: 0 0% 45%;
-    --accent: 56 100% 64%;
-    --accent-foreground: 0 0% 0%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 90%;
-    --input: 0 0% 90%;
-    --ring: 56 100% 64%;
-    --radius: 0.625rem;
-    --sidebar-width: 240px;
+    --muted-foreground: 0 0% 42%;
+    --accent: 0 0% 96%;
+    --accent-foreground: 0 0% 6%;
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 88%;
+    --input: 0 0% 88%;
+    --ring: 0 0% 6%;
+    --radius: 0.75rem;
+    /* Zwevende zijbalk: 12px marge + 240px paneel + 12px lucht naar de inhoud. */
+    --sidebar-width: 264px;
+    /* Glas: lichte, halfdoorzichtige vlakken met wazige achtergrond. */
+    --glas: rgba(246, 246, 246, 0.74);
+    --glas-rand: rgba(255, 255, 255, 0.8);
+
+    /* ── Contentplanning: kleuren en typografie op één plek ──────────────────
+       Voorlopig zwart-wit; de branding komt later — enkel deze waarden
+       aanpassen. De drie reekskleuren zijn functioneel (welke dag in welke reeks). */
+    --cp-ink: #0f0f0f;            /* tekst, actieve tab, primaire knop */
+    --cp-ink-zacht: #6b6b6b;      /* labels, datums */
+    --cp-op-ink: #ffffff;         /* tekst op een donkere knop */
+    --cp-vlak: #ffffff;           /* kaarten */
+    --cp-achtergrond: #f0f0f0;    /* zachte vlakken, kolommen */
+    --cp-rand: #e0e0e0;
+    --cp-klaar: #0f0f0f;          /* afgevinkt */
+    --cp-vandaag: #0f0f0f;        /* rand rond vandaag */
+    --cp-r1: #facc15;  --cp-r1-zacht: #fefce8;   /* reeks 1 · geel */
+    --cp-r2: #a855f7;  --cp-r2-zacht: #faf5ff;   /* reeks 2 · paars */
+    --cp-r3: #16a34a;  --cp-r3-zacht: #f0fdf4;   /* reeks 3 · groen */
+    --cp-font: var(--font-sans, ui-sans-serif);
+    --cp-tekst-titel: 1.5rem;
+    --cp-tekst-kop: 1.125rem;
+    --cp-tekst-basis: 1rem;
+    --cp-tekst-klein: 0.8125rem;
+    --cp-radius: 0.75rem;
   }
 
   * {
     border-color: hsl(var(--border));
   }
 
+  /* Vangnet: ook als Tailwind's font-sans om wat voor reden ook niet toegepast
+     wordt, staat hier al een sans-serif. Zo kan er nergens een serif opduiken. */
+  html {
+    font-family: var(--font-sans, ui-sans-serif), ui-sans-serif, system-ui,
+      -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  }
+
+  /* Lichtgrijze achtergrond (neutraal, zonder tint) met wat licht in de hoeken
+     en een fijne korrel, zoals de beeldstijl van NextGen Agency (grain). */
   body {
-    @apply bg-white text-[#0a0a0a] font-sans antialiased;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    @apply text-gray-900 font-sans antialiased;
+    background-color: #e9e9e9;
+    background-image:
+      radial-gradient(1100px 620px at 8% -8%, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0) 62%),
+      radial-gradient(900px 560px at 100% 0%, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0) 58%),
+      radial-gradient(1000px 700px at 60% 110%, rgba(214, 214, 214, 0.9) 0%, rgba(214, 214, 214, 0) 60%);
+    background-attachment: fixed;
+    text-rendering: optimizeLegibility;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.05;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='k'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0'/></filter><rect width='100%' height='100%' filter='url(%23k)'/></svg>");
+  }
+
+  ::selection {
+    background: #0f0f0f;
+    color: #ffffff;
+  }
+
+  /* Zichtbare, consistente toetsenbordfocus. :where() houdt de specificiteit op
+     nul, zodat elementen met een eigen focusstijl (ring-klassen) die behouden. */
+  :where(a, button, [role='button'], summary, [tabindex]):focus-visible {
+    outline: 2px solid #0f0f0f;
+    outline-offset: 2px;
+  }
+
+  /* Bedragen en tabellen: cijfers even breed, zodat kolommen netjes uitlijnen.
+     In een app vol facturen/bedragen is dit het verschil tussen "af" en slordig. */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Hard guard tegen horizontale scroll op mobiel: niets mag breder zijn dan
+     het scherm. 'clip' i.p.v. 'hidden': hidden op html én body maakt van body
+     een eigen scrollcontainer, en dan werkt position: sticky nergens meer
+     (de bovenbalk scrolde weg). Oudere browsers vallen terug op hidden. */
+  html, body {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+  @supports (overflow-x: clip) {
+    html, body {
+      overflow-x: clip;
+    }
   }
 
   h1, h2, h3, h4, h5, h6 {
-    @apply font-semibold tracking-tight;
+    @apply font-semibold tracking-tight text-gray-900;
+  }
+  /* Paginatitels in Archivo Bold, zoals het logo. */
+  h1 {
+    font-weight: 700;
+    letter-spacing: -0.02em;
   }
 }
 
-@layer utilities {
-  .brand-yellow { color: #fff848; }
-  .bg-brand { background-color: #fff848; }
-  .border-brand { border-color: #fff848; }
+/* Agenda: de volle breedte naast de zijbalk, ook voorbij de maximale paginabreedte. */
+@media (min-width: 768px) {
+  .volle-breedte {
+    width: calc(100vw - var(--sidebar-width) - 28px);
+    margin-left: calc((100% - (100vw - var(--sidebar-width) - 28px)) / 2);
+  }
+}
 
+@layer components {
+  /* Oude merkhulpjes. */
+  .brand-yellow { color: #0f0f0f; }
+  .bg-brand { background-color: #0f0f0f; }
+  .border-brand { border-color: #0f0f0f; }
+
+  /* Labels en ondertitels in JetBrains Mono, zoals AGENCY in het logo. */
+  .label-mono {
+    @apply font-mono text-[11px] uppercase tracking-[0.12em] text-gray-500;
+  }
+
+  /* Glas: het zwevende paneel van de zijbalk, de bovenbalk en zachte vlakken. */
+  .glas {
+    background: var(--glas);
+    border: 1px solid var(--glas-rand);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+    backdrop-filter: blur(24px) saturate(140%);
+  }
+
+  /* Navigatie: licht glaspaneel; de huidige pagina is een witte pil met een zachte schaduw. */
   .sidebar-item {
-    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-black hover:bg-gray-100 transition-colors duration-150;
+    @apply relative flex items-center gap-3 px-3.5 py-2 rounded-lg text-[13px] font-normal text-gray-600 hover:text-gray-900 hover:bg-white/70 transition-colors duration-150;
   }
   .sidebar-item.active {
-    @apply text-black bg-[#fff848]/20;
+    @apply text-gray-900 bg-white font-medium shadow-sm;
   }
 
   .card-base {
-    @apply bg-white border border-gray-200 rounded-xl p-5 shadow-sm;
+    @apply bg-white border border-black/[0.05] rounded-[14px] shadow-md p-4 md:p-5;
   }
 
   .stat-card {
-    @apply bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow;
+    @apply bg-white border border-black/[0.05] rounded-[14px] shadow-md p-4;
   }
 
   .btn-primary {
-    @apply inline-flex items-center gap-2 px-4 py-2 bg-[#fff848] text-black font-semibold rounded-lg hover:bg-[#f5ee30] transition-colors text-sm;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-gray-900 text-white font-medium rounded-lg border border-gray-900 shadow-[0_8px_20px_-10px_rgba(15,15,15,0.55)] hover:bg-gray-800 hover:border-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 transition-colors duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
   }
 
   .btn-secondary {
-    @apply inline-flex items-center gap-2 px-4 py-2 bg-white text-black font-medium rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors text-sm;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-white text-gray-900 font-medium rounded-lg border border-black/[0.1] shadow-sm hover:bg-gray-50 hover:border-black/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 transition-colors duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
   }
 
   .btn-danger {
-    @apply inline-flex items-center gap-2 px-4 py-2 bg-red-50 text-red-700 font-medium rounded-lg border border-red-200 hover:bg-red-100 transition-colors text-sm;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-white text-red-700 font-medium rounded-lg border border-red-200 shadow-sm hover:bg-red-50 hover:border-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2 transition-colors duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  /* Klikbare kaarten: de schaduw wordt iets dieper, niets beweegt. */
+  a.card-base:hover {
+    @apply border-black/[0.08] shadow-lg;
   }
 
   .input-base {
-    @apply w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848] transition-colors;
+    @apply w-full px-3.5 py-2 text-sm text-gray-900 border border-black/[0.1] rounded-lg bg-white/90 placeholder:text-gray-400 focus:outline-none focus:bg-white focus:border-gray-400 focus:ring-4 focus:ring-gray-900/[0.06] transition-colors;
   }
 
   .table-th {
-    @apply px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider;
+    @apply px-4 py-2.5 text-left font-mono text-[10.5px] font-normal uppercase text-gray-500 tracking-[0.08em] whitespace-nowrap;
   }
 
   .table-td {
-    @apply px-4 py-3 text-sm text-gray-900;
+    @apply px-4 py-2.5 text-sm text-gray-800;
   }
 
   .status-badge {
-    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap;
+  }
+
+  /* Nette lege staat — consistent over alle modules */
+  .empty-state {
+    @apply text-center py-10 text-sm text-gray-500;
   }
 }
 
+/* ── Mobile responsive helpers ─────────────────────────────────────────────── */
+
+/* Media can never exceed its container — prevents accidental horizontal overflow
+   from images/SVG/canvas/video on small screens. */
+img, svg, video, canvas {
+  max-width: 100%;
+}
+
+/* All modals: constrain height + scroll on small screens.
+   Apply to every modal's inner panel (the white rounded box). */
+.modal-panel {
+  @apply max-h-[90dvh] overflow-y-auto;
+}
+
+/* Tables: horizontal scroll wrapper */
+.table-wrap {
+  @apply overflow-x-auto;
+}
+
+/* Responsive header rows: stack on mobile when there are many action buttons */
+.page-header {
+  @apply flex items-start justify-between gap-3 flex-wrap;
+}
+.page-header-actions {
+  @apply flex items-center gap-2 flex-wrap;
+}
+
+/* Telefoon: invoervelden op 16px, anders zoomt iOS bij elke tik in een veld in
+   en blijft de pagina uitvergroot staan. */
+@media (max-width: 767px) {
+  input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Tabellen als kaarten op telefoon — zie components/ui/kaart-tabel.tsx */
+@media (max-width: 767px) {
+  .kaart-tabel table,
+  .kaart-tabel tbody,
+  .kaart-tabel tfoot,
+  .kaart-tabel tr,
+  .kaart-tabel td {
+    display: block;
+    width: 100%;
+  }
+  .kaart-tabel table {
+    min-width: 0 !important;
+  }
+  .kaart-tabel thead {
+    display: none;
+  }
+  .kaart-tabel tbody tr,
+  .kaart-tabel tfoot tr {
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    border-radius: 0.875rem;
+    box-shadow: 0 1px 2px rgba(15, 15, 15, 0.03), 0 10px 24px -14px rgba(15, 15, 15, 0.12);
+    padding: 0.625rem 0.875rem;
+    margin-bottom: 0.625rem;
+  }
+  .kaart-tabel tfoot tr {
+    background: #f7f7f7;
+  }
+  .kaart-tabel td {
+    display: block;
+    padding: 0.2rem 0 !important;
+    border: 0 !important;
+    text-align: right !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+  .kaart-tabel td::after {
+    content: '';
+    display: table;
+    clear: both;
+  }
+  .kaart-tabel td::before {
+    content: attr(data-label);
+    float: left;
+    max-width: 50%;
+    margin-right: 0.75rem;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.6;
+    color: #6e6e6e;
+    text-align: left;
+  }
+  .kaart-tabel td[data-label='']::before {
+    display: none;
+  }
+  /* De eerste cel is de titel van de kaart */
+  .kaart-tabel td:first-child {
+    text-align: left !important;
+    font-weight: 600;
+    padding-bottom: 0.35rem !important;
+  }
+  .kaart-tabel td:first-child::before {
+    display: none;
+  }
+  /* Lege cellen niet tonen */
+  .kaart-tabel td:empty {
+    display: none;
+  }
+  /* Tabel-wrappers hoeven niet meer zijwaarts te scrollen en geen kader te hebben */
+  .kaart-tabel .table-wrap,
+  .kaart-tabel .overflow-x-auto {
+    overflow: visible;
+  }
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 5px;
@@ -101,11 +343,26 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: #cccccc;
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+  background: #999999;
+}
+
+/* Witte kaders met een grijze rand (overal in de app) krijgen dezelfde zachte
+   uitstraling als de kaarten: een lichtere rand en een diffuse schaduw. Enkel
+   als ze zelf geen schaduw kiezen, en nooit voor invoervelden. */
+:is(div, section, article, li, a, aside, form, details, header, ul).bg-white.border[class*='rounded-'][class*='border-gray-200']:not([class*='shadow']) {
+  border-color: rgba(15, 15, 15, 0.07);
+  box-shadow: 0 1px 2px rgba(15, 15, 15, 0.03), 0 10px 26px -16px rgba(15, 15, 15, 0.12);
+}
+
+/* Vensters: de pagina achter een venster wordt wazig, zoals matglas. Geldt voor
+   elke overlay met een zwarte doorschijnende achtergrond (bg-black/30, /40 …). */
+.fixed.inset-0[class*='bg-black/'] {
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
 }
 
 /* Calendar drag ghost */
@@ -115,3 +372,142 @@
 [draggable=true]:active {
   cursor: grabbing;
 }
+
+/* Toegankelijkheid: wie in zijn systeem "minder beweging" heeft ingesteld,
+   krijgt geen animaties of transities. Verplicht bij micro-interacties. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+
+/* Horizontaal scrollen zonder zichtbare balk (filterchips op gsm). */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Zoekvelden (type search, zie lib/zoekveld.ts): geen eigen kruisje of
+   afgeronde stijl van Safari/Chrome, zodat ze er net zo uitzien als voorheen. */
+input[type='search']::-webkit-search-cancel-button,
+input[type='search']::-webkit-search-results-button,
+input[type='search']::-webkit-search-results-decoration { -webkit-appearance: none; appearance: none; display: none; }
+
+/* Agenda: opgemaakte documenten (TipTap), zoals in ClickUp. */
+.ag-doc .ProseMirror { font-size: 15px; line-height: 1.65; color: #0f0f0f; min-height: 45vh; padding-bottom: 4rem; }
+.ag-doc .ProseMirror > * + * { margin-top: 0.55em; }
+.ag-doc .ProseMirror h1 { font-size: 1.85rem; font-weight: 700; line-height: 1.2; margin-top: 1.3em; letter-spacing: -0.01em; }
+.ag-doc .ProseMirror h2 { font-size: 1.4rem; font-weight: 700; line-height: 1.25; margin-top: 1.2em; }
+.ag-doc .ProseMirror h3 { font-size: 1.12rem; font-weight: 600; margin-top: 1.05em; }
+.ag-doc .ProseMirror > h1:first-child, .ag-doc .ProseMirror > h2:first-child, .ag-doc .ProseMirror > h3:first-child { margin-top: 0.2em; }
+.ag-doc .ProseMirror ul { list-style: disc; padding-left: 1.5em; }
+.ag-doc .ProseMirror ol { list-style: decimal; padding-left: 1.6em; }
+.ag-doc .ProseMirror ul ul { list-style: circle; }
+.ag-doc .ProseMirror li { margin-top: 0.2em; }
+.ag-doc .ProseMirror li > p { margin: 0; }
+.ag-doc .ProseMirror li::marker { color: #4b4b4b; }
+.ag-doc .ProseMirror ul[data-type="taskList"] { list-style: none; padding-left: 0.15em; }
+.ag-doc .ProseMirror ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 0.55em; }
+.ag-doc .ProseMirror ul[data-type="taskList"] li > label { flex: none; margin-top: 0.28em; user-select: none; }
+.ag-doc .ProseMirror ul[data-type="taskList"] li > label input { width: 1em; height: 1em; accent-color: #0f0f0f; cursor: pointer; }
+.ag-doc .ProseMirror ul[data-type="taskList"] li > div { flex: 1; min-width: 0; }
+.ag-doc .ProseMirror li[data-checked="true"] > div { text-decoration: line-through; color: #8a8a8a; }
+.ag-doc .ProseMirror blockquote { border-left: 3px solid #0f0f0f; background: #f6f6f6; border-radius: 0 10px 10px 0; padding: 0.6em 1em; color: #272727; }
+.ag-doc .ProseMirror hr { border: 0; border-top: 1px solid #e0e0e0; margin: 1.4em 0; }
+.ag-doc .ProseMirror mark { border-radius: 3px; padding: 0 0.12em; color: inherit; }
+.ag-doc .ProseMirror a { text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.ag-doc .ProseMirror code { background: #f1f1f1; border-radius: 4px; padding: 0.1em 0.3em; font-family: var(--font-mono, ui-monospace), monospace; font-size: 0.88em; }
+.ag-doc .ProseMirror pre { background: #0f0f0f; color: #f5f5f5; border-radius: 10px; padding: 0.8em 1em; overflow-x: auto; font-family: var(--font-mono, ui-monospace), monospace; font-size: 0.88em; }
+.ag-doc .ProseMirror pre code { background: none; padding: 0; color: inherit; }
+.ag-doc .ProseMirror .tableWrapper { overflow-x: auto; margin: 1em 0; }
+.ag-doc .ProseMirror table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 0; }
+.ag-doc .ProseMirror td, .ag-doc .ProseMirror th { border: 1px solid #e0e0e0; padding: 0.45em 0.65em; vertical-align: top; position: relative; min-width: 70px; box-sizing: border-box; }
+.ag-doc .ProseMirror th { background: #f5f5f5; font-weight: 600; text-align: left; }
+.ag-doc .ProseMirror td > p, .ag-doc .ProseMirror th > p { margin: 0; }
+.ag-doc .ProseMirror .selectedCell::after { content: ''; position: absolute; inset: 0; background: rgba(15, 15, 15, 0.07); pointer-events: none; }
+.ag-doc .ProseMirror .column-resize-handle { position: absolute; right: -2px; top: 0; bottom: -2px; width: 4px; background: #0f0f0f; pointer-events: none; }
+.ag-doc .ProseMirror.resize-cursor { cursor: col-resize; }
+.ag-doc .ProseMirror img { max-width: 100%; height: auto; border-radius: 10px; display: block; }
+.ag-doc .ProseMirror img.ProseMirror-selectednode { outline: 2px solid #0f0f0f; outline-offset: 2px; }
+.ag-doc .ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: #a3a3a3; float: left; height: 0; pointer-events: none; }
+/* Beschrijving van een taak: dezelfde opmaak, compacter, brede tabellen schuiven opzij. */
+.ag-doc-kort .ProseMirror { font-size: 14.5px; line-height: 1.6; min-height: 5.5rem; padding-bottom: 0.5rem; }
+.ag-doc-kort .ProseMirror h1 { font-size: 1.45rem; margin-top: 1em; }
+.ag-doc-kort .ProseMirror h2 { font-size: 1.2rem; margin-top: 1em; }
+.ag-doc-kort .ProseMirror h3 { font-size: 1.04rem; margin-top: 0.9em; }
+.ag-doc-kort .ProseMirror .tableWrapper { margin: 0.75em 0; border: 1px solid #e0e0e0; border-radius: 10px; }
+.ag-doc-kort .ProseMirror table { table-layout: auto; width: max-content; min-width: 100%; font-size: 13px; line-height: 1.45; }
+.ag-doc-kort .ProseMirror td, .ag-doc-kort .ProseMirror th { min-width: 4.5rem; max-width: 18rem; border-top: 0; border-left: 0; }
+.ag-doc-kort .ProseMirror tr > *:last-child { border-right: 0; }
+.ag-doc-kort .ProseMirror tr:last-child > td { border-bottom: 0; }
+.ag-doc-kort .ProseMirror a { color: #0f0f0f; }
+.ag-doc-kort .sticky { top: -1px; }
+
+/* ── Huisstijl NextGenMedia (27 nov 2026, lib/ngm-merk.ts, components/ngm-merk.tsx) ──
+   Enkel binnen .ngm: de publieke pagina's van NextGenMedia (shootplan, meeting
+   boeken, tekenen en offertes van NextGenMedia). Woud draagt, zonnegeel licht op
+   (knoppen, accenten op woud), kalk geeft rust. De rest van de app blijft NextGen Agency. */
+.ngm {
+  --ngm-woud: #0C2B1E; --ngm-zonnegeel: #FDDB57; --ngm-kalk: #FAF7EE; --ngm-mos: #A9BFA9; --ngm-varen: #4F6B5A; --ngm-lijn: #E6E0D0;
+  font-family: var(--font-ngm-tekst), ui-sans-serif, system-ui, sans-serif;
+  background: var(--ngm-kalk);
+  color: var(--ngm-woud);
+  position: relative;
+  z-index: 0;
+}
+.ngm h1, .ngm h2, .ngm h3 { font-family: var(--font-ngm-titel), var(--font-ngm-tekst), sans-serif; color: var(--ngm-woud); letter-spacing: -0.02em; }
+.ngm h1 { font-weight: 800; }
+.ngm h2, .ngm h3 { font-weight: 700; }
+.ngm .ngm-label, .ngm .label-mono { font-family: var(--font-ngm-mono), ui-monospace, monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; }
+.ngm .text-gray-900, .ngm .text-gray-800, .ngm .text-gray-700, .ngm .text-black { color: var(--ngm-woud); }
+.ngm .text-gray-600, .ngm .text-gray-500, .ngm .text-gray-400 { color: var(--ngm-varen); }
+.ngm .border-gray-100, .ngm .border-gray-200, .ngm .border-gray-300 { border-color: var(--ngm-lijn); }
+.ngm .bg-gray-50 { background-color: var(--ngm-kalk); }
+.ngm .bg-gray-100 { background-color: #F1ECDF; }
+.ngm .bg-gray-900, .ngm .bg-black { background-color: var(--ngm-woud); }
+.ngm .border-geel { border-color: var(--ngm-zonnegeel); }
+.ngm .card-base, .ngm .bg-white.border { background-color: #fff; border-color: var(--ngm-lijn); }
+.ngm .btn-primary { background: var(--ngm-zonnegeel); color: var(--ngm-woud); border-color: var(--ngm-zonnegeel); border-radius: 9999px; font-weight: 700; box-shadow: none; }
+.ngm .btn-primary:hover:not(:disabled) { background: #F7CF3E; border-color: #F7CF3E; }
+.ngm .btn-primary:disabled { opacity: 0.55; }
+.ngm .btn-secondary { background: #fff; color: var(--ngm-woud); border-color: var(--ngm-lijn); border-radius: 9999px; }
+.ngm .btn-secondary:hover:not(:disabled) { border-color: var(--ngm-woud); }
+.ngm .input-base:focus { border-color: var(--ngm-woud); box-shadow: 0 0 0 3px rgba(12, 43, 30, 0.12); }
+.ngm input[type=checkbox] { accent-color: var(--ngm-woud); }
+
+/* ── Huisstijl NextGenSolutions (27 nov 2026, lib/ngs-merk.ts, components/ngs-merk.tsx) ──
+   Enkel binnen .ngs: de publieke pagina's van NextGenSolutions (tekenen, ontvangstbewijs,
+   offertes). Kalk en wit doen het werk, inkt voor tekst, NextGen-blauw enkel waar je iets
+   kunt doen (één blauwe knop per scherm). Labels in Jersey 15, kapitalen, +8%. */
+.ngs {
+  --ngs-kalk: #F4F3EF; --ngs-inkt: #0B0B0C; --ngs-blauw: #1E40AF; --ngs-blauw-hover: #172F86; --ngs-ijs: #E8EDFB; --ngs-tekst: #5E5E5E; --ngs-steen: #6F6E6A; --ngs-lijn: #DEDDD8;
+  font-family: var(--font-ngs-tekst), ui-sans-serif, system-ui, sans-serif;
+  background: var(--ngs-kalk);
+  color: var(--ngs-inkt);
+  position: relative;
+  z-index: 0;
+}
+.ngs h1, .ngs h2, .ngs h3 { font-family: var(--font-ngs-titel), var(--font-ngs-tekst), sans-serif; color: var(--ngs-inkt); letter-spacing: -0.025em; }
+.ngs h1 { font-weight: 600; }
+.ngs h2, .ngs h3 { font-weight: 700; }
+.ngs .ngs-label, .ngs .label-mono { font-family: var(--font-ngs-label), ui-monospace, monospace; font-size: 15px; line-height: 1; letter-spacing: 0.08em; text-transform: uppercase; }
+.ngs .text-gray-900, .ngs .text-gray-800, .ngs .text-gray-700, .ngs .text-black { color: var(--ngs-inkt); }
+.ngs .text-gray-600, .ngs .text-gray-500, .ngs .text-gray-400 { color: var(--ngs-tekst); }
+.ngs .border-gray-100, .ngs .border-gray-200, .ngs .border-gray-300 { border-color: var(--ngs-lijn); }
+.ngs .bg-gray-50 { background-color: var(--ngs-kalk); }
+.ngs .bg-gray-100 { background-color: #ECEBE6; }
+.ngs .bg-gray-900, .ngs .bg-black { background-color: var(--ngs-inkt); }
+.ngs .card-base, .ngs .bg-white.border { background-color: #fff; border-color: rgba(11, 11, 12, 0.08); border-radius: 16px; box-shadow: none; }
+.ngs .btn-primary { background: var(--ngs-blauw); color: #fff; border-color: var(--ngs-blauw); border-radius: 9999px; font-weight: 600; box-shadow: none; }
+.ngs .btn-primary:hover:not(:disabled) { background: var(--ngs-blauw-hover); border-color: var(--ngs-blauw-hover); }
+.ngs .btn-primary:disabled { opacity: 0.55; }
+.ngs .btn-secondary { background: #fff; color: var(--ngs-inkt); border-color: rgba(11, 11, 12, 0.25); border-radius: 9999px; }
+.ngs .btn-secondary:hover:not(:disabled) { border-color: var(--ngs-inkt); }
+.ngs .input-base { border-radius: 14px; }
+.ngs .input-base:focus { border-color: var(--ngs-blauw); box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.12); }
+.ngs input[type=checkbox] { accent-color: var(--ngs-blauw); }
+.ngs a.text-blue-600, .ngs .text-blue-600 { color: var(--ngs-blauw); }

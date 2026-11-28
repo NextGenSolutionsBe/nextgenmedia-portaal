@@ -1,0 +1,48 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Herstellen uit de backup van voor het verbeterplan (26 nov 2026, 21:28 UTC)
+--
+-- Waar staat de backup?
+--   Schema backup_voor_verbeterplan in dezelfde databank: een volledige kopie
+--   van 236 tabellen van de app (73.518 rijen). Niet bereikbaar via de app of
+--   de API (geen rechten voor anon of authenticated). Overzicht met het aantal
+--   rijen per tabel: backup_voor_verbeterplan._overzicht.
+--   Niet gekopieerd: tabellen van andere apps (aanbesteding_*, community_*,
+--   harrie_*, mcp_oauth_*), geheimen en logins (cron_geheimen, user_totp,
+--   user_herstelcodes, login_codes, twofa_sessies), het draailogboek
+--   clickup_agenda_runs en rate_limit_hits. Die raakt het verbeterplan niet.
+--   Bestanden in de opslag (buckets) worden door het plan niet aangeraakt.
+--
+-- Code van voor het plan: commit 733308a op main.
+-- Extra: Supabase maakt elke dag zelf een backup (7 dagen bijgehouden),
+--   te downloaden via Supabase → Database → Backups.
+--
+-- Gebruik: vervang TABEL door de naam van de tabel en voer het blok uit.
+-- Dit zet de tabel terug zoals ze was op het moment van de backup. Alles wat
+-- er sindsdien in die tabel bijkwam of veranderde, gaat dan verloren: kijk dus
+-- eerst wat je terugzet. De backup werd genomen net na de databankstap van
+-- fase 1, die enkel nieuwe kolommen toevoegde en geen bestaande waarde
+-- veranderde (checksums voor en na identiek). De bestaande gegevens in de
+-- backup zijn dus exact die van voor het plan. Kolommen die in latere fasen
+-- bijkomen, blijven bestaan maar worden leeg voor de teruggezette rijen.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 1. Eerst kijken: wat is het verschil?
+-- select (select count(*) from public.TABEL) as nu, (select rijen from backup_voor_verbeterplan._overzicht where tabel = 'TABEL') as in_backup;
+
+-- 2. Eén tabel terugzetten (in één transactie, zodat het alles of niets is):
+-- begin;
+-- create temp table _bewaard_nu as table public.TABEL;   -- vangnet: de huidige stand
+-- delete from public.TABEL;
+-- do $$
+-- declare kolommen text;
+-- begin
+--   select string_agg(quote_ident(column_name), ', ' order by ordinal_position) into kolommen
+--   from information_schema.columns where table_schema = 'backup_voor_verbeterplan' and table_name = 'TABEL';
+--   execute format('insert into public.TABEL (%s) select %s from backup_voor_verbeterplan.TABEL', kolommen, kolommen);
+-- end $$;
+-- select count(*) from public.TABEL;                       -- moet gelijk zijn aan "in_backup"
+-- commit;                                                 -- of rollback; als het niet klopt
+
+-- 3. Fase 1 van het plan helemaal ongedaan maken (nieuwe kolommen en tabellen weg):
+--    zie supabase/terugdraaien/fase1.sql. Bestaande gegevens werden in fase 1 niet
+--    gewijzigd (checksums voor en na identiek), dus een tabelherstel is daar niet nodig.
