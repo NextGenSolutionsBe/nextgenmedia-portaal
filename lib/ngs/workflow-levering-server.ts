@@ -169,6 +169,16 @@ export async function workflowActie(admin: Admin, b: Record<string, unknown>, do
     await zetWf(admin, w.id, faseWissel(w, naar, t))
     await tijdlijn(admin, w.deal_id, `${w.naam}: ${wfFaseLabel(w.fase)} → ${wfFaseLabel(naar)}`, door)
     await volgProject(admin, w.project_id!, door)
+    // Bij de oplevering komt de factuur van de workflow klaar (fase 5), één keer.
+    if (['oplevering', 'nazorg', 'klaar'].includes(naar)) {
+      try {
+        const { maakWorkflowFactuur } = await import('./facturatie-server')
+        const f = await maakWorkflowFactuur(admin, w.id, door)
+        if (f) return { ok: true, factuur: f }
+      } catch (e) {
+        return { ok: true, waarschuwing: `De factuur kon niet klaargezet worden (${e instanceof Error ? e.message : 'onbekende fout'}). Maak ze met de hand bij Facturen.` }
+      }
+    }
     return { ok: true }
   }
   if (actie === 'wf.wacht') {

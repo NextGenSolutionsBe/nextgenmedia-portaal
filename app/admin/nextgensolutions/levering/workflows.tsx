@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { toast } from 'sonner'
 import { Check, Loader2, Plus, CalendarPlus, Pause, Play, Video, Archive, AlertTriangle, ChevronDown } from 'lucide-react'
 import {
   WF_FASES, wfFaseLabel, bouwDagenGeteld, bouwTeLaat, bouwDeadline, nazorgStand, dodVan, waaromNietNaarWf, tijdlijnBalken,
@@ -98,7 +99,7 @@ function WorkflowKaart({ w, L, clientId, stories, bezig, doe, onVernieuw }: { w:
               const fout = waaromNietNaarWf(w, f.key, stories)
               return (
                 <button key={f.key} type="button" disabled={!!bezig} title={fout ?? undefined} aria-pressed={w.fase === f.key}
-                  onClick={() => f.key !== w.fase && zet({ actie: 'wf.fase', naar: f.key }, `f${w.id}`, `${w.naam}: ${f.label}.`)}
+                  onClick={() => { if (f.key !== w.fase) void zet({ actie: 'wf.fase', naar: f.key }, `f${w.id}`, `${w.naam}: ${f.label}.`).then((j) => { if (j?.waarschuwing) toast.warning(String(j.waarschuwing)); else if (j?.factuur) toast.success('De factuur staat bij Te factureren.') }) }}
                   className={`h-8 rounded-lg text-[11px] leading-tight px-0.5 ${w.fase === f.key ? 'bg-white shadow-sm font-semibold text-gray-900' : i < idx ? 'text-gray-700' : 'text-gray-500 hover:text-gray-900'}`}>{f.label}</button>
               )
             })}

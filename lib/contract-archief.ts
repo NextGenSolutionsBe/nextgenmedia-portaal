@@ -1,4 +1,5 @@
 import 'server-only'
+import { BEDRIJF } from '@/lib/offerte-afzender'
 import { createHash } from 'crypto'
 import { readFile } from 'fs/promises'
 import path from 'path'
@@ -71,14 +72,19 @@ async function reserveerCertificaatnummer(admin: Admin, contractId: string, vers
 async function laadDossier(admin: Admin, contractId: string, bron: string, versie: number, sha256Contract: string, certificaatNr: string): Promise<Dossier> {
   const { data: c } = await admin.from('contracts').select('*').eq('id', contractId).maybeSingle()
   if (!c) throw new Error('Contract niet gevonden.')
-  const [{ data: klant }, { data: sig }, { data: events }, instellingen] = await Promise.all([
+  const [{ data: klant }, { data: sig }, { data: events }, instellingen, { data: merkBedrijf }] = await Promise.all([
     c.client_id ? admin.from('clients').select('company_name, contact_name').eq('id', c.client_id).maybeSingle() : Promise.resolve({ data: null }),
     admin.from('contract_signatures').select('*').eq('contract_id', contractId).order('signed_at', { ascending: false }).limit(1).maybeSingle(),
     admin.from('contract_events').select('event_type, created_at, actor, ip_address, user_agent').eq('contract_id', contractId).order('created_at', { ascending: true }).limit(200),
     leesInstellingen().catch(() => null),
+    c.bedrijf === 'nextgensolutions' ? admin.from('bedrijven').select('handelsnaam').eq('slug', 'nextgensolutions').maybeSingle() : Promise.resolve({ data: null }),
   ])
   const org = instellingen?.organisatie
-  const bedrijfsnaam = String(org?.handelsnaam || org?.vennootschapsnaam || 'NextGenMedia').trim() || 'NextGenMedia'
+  // Contracten van Solutions: "NextGen Agency BV, handelsnaam NextGenSolutions" (nieuwe werking fase 5, enkel nieuwe certificaten).
+  const solHandels = String((merkBedrijf as { handelsnaam?: string | null } | null)?.handelsnaam ?? '').trim()
+  const vennootschap = BEDRIJF.vennootschap
+  const bedrijfsnaam = solHandels ? `${vennootschap}, handelsnaam ${solHandels}`
+    : String(org?.handelsnaam || org?.vennootschapsnaam || 'NextGenMedia').trim() || 'NextGenMedia'
   const k = klant as { company_name?: string | null; contact_name?: string | null } | null
   return {
     contractId,

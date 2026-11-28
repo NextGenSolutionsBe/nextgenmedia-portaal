@@ -9316,3 +9316,15 @@ ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS klaar_op timestamptz;
 ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS verantwoordelijke text;
 ALTER TABLE klant_meetings ADD COLUMN IF NOT EXISTS ngs_workflow_id uuid REFERENCES ngs_workflows(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS klant_meetings_ngs_workflow_idx ON klant_meetings (ngs_workflow_id) WHERE ngs_workflow_id IS NOT NULL;
+
+-- ═══ Nieuwe werking fase 5 (28 nov 2026): facturatie van Solutions. Additief. ═══
+ALTER TABLE bedrijven ADD COLUMN IF NOT EXISTS betaaltermijn_dagen integer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'bedrijven_betaaltermijn_check') THEN
+    ALTER TABLE bedrijven ADD CONSTRAINT bedrijven_betaaltermijn_check CHECK (betaaltermijn_dagen IS NULL OR (betaaltermijn_dagen >= 0 AND betaaltermijn_dagen <= 365));
+  END IF;
+END $$;
+UPDATE bedrijven SET betaaltermijn_dagen = 30 WHERE slug = 'nextgensolutions' AND betaaltermijn_dagen IS NULL;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_factuur_id uuid REFERENCES invoices(id) ON DELETE SET NULL;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS factuur_id uuid REFERENCES invoices(id) ON DELETE SET NULL;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS verrekend_bedrag numeric;

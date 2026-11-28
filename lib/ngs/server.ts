@@ -174,6 +174,15 @@ export async function verplaatsDeal(admin: Admin, id: string, b: Record<string, 
   if (nieuw.fase === 'voorstel' && patch.vervolg_op) extra = ` · vervolgafspraak ${new Date(String(patch.vervolg_op)).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
   await systeem(admin, id, `${faseLabel(oud.fase)} → ${faseLabel(nieuw.fase)}${extra}`, door)
   await faseLog(admin, id, oud.fase, nieuw.fase, door)
+  if (nieuw.fase === 'audit') {
+    // De audit wordt vooraf gefactureerd (fase 5): bij Te factureren, versturen doet een mens.
+    try {
+      const { maakAuditFactuur } = await import('./facturatie-server')
+      await maakAuditFactuur(admin, id, door)
+    } catch (e) {
+      waarschuwing = [waarschuwing, `De auditfactuur kon niet klaargezet worden (${e instanceof Error ? e.message : 'onbekende fout'}). Maak ze met de hand bij Facturen.`].filter(Boolean).join(' ')
+    }
+  }
   return { deal: nieuw, waarschuwing }
 }
 

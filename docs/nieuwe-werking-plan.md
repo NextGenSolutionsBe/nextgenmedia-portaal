@@ -4,6 +4,7 @@
 
 ## Voortgang
 
+- **Fase 5: af en live (28 nov 2026).** Geen facturen gemaakt voor bestaande deals (er zat nog geen deal in Audit). Solutions kreeg betaaltermijn 30 dagen; Media en Algemeen staan leeg, dus daar blijft het zoals het was (offertes 14, facturen 30: zie Nog te beslissen 2). Onderweg gevonden: een opgemaakte offerte van Solutions toonde "handelsnaam NextGenMedia"; dat komt nu uit de bedrijven-tabel.
 - **Fase 4: af en live (28 nov 2026).** Geen data omgezet: er waren nog geen leveringsprojecten. Het oude "Plan met vaste prijs" verdwijnt zodra een project workflows heeft; zonder workflows blijft het staan, zodat niets stil verdwijnt. De definitie van klaar wordt afgeleid (geen aparte kolom `dod`). Workflows hangen aan hun processen via `ngs_audit_processen.workflow_id` (geen `proces_ids`).
 - **Fase 3: af en live (28 nov 2026).** Geen data omgezet: er waren nog geen rapporten.
 - **Fase 2: af en live (28 nov 2026).** Geen data omgezet; de 16 deals bleven in hun fase. De 12 Solutions-kaarten staan op de lijst bovenaan Projecten om te beslissen.
