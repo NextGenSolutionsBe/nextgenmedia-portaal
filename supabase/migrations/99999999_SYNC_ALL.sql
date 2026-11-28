@@ -9248,3 +9248,46 @@ END $$;
 INSERT INTO ngs_deal_fases (deal_id, van, naar, op, door)
 SELECT d.id, NULL, d.fase, coalesce(d.fase_sinds, d.created_at), 'Beginstand 28 nov 2026'
 FROM ngs_deals d WHERE NOT EXISTS (SELECT 1 FROM ngs_deal_fases f WHERE f.deal_id = d.id);
+
+-- ═══ Nieuwe werking fase 3 (28 nov 2026): auditrapport en prijs per workflow. Additief. ═══
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_notities text;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS briefing_notities text;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS rapport_afgerond_op timestamptz;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS rapport_afgerond_door text;
+CREATE TABLE IF NOT EXISTS ngs_workflows (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id uuid REFERENCES ngs_deals(id) ON DELETE CASCADE,
+  project_id uuid REFERENCES ngs_projecten(id) ON DELETE SET NULL,
+  volgorde integer NOT NULL DEFAULT 0,
+  naam text NOT NULL,
+  oplossing text,
+  soort text NOT NULL DEFAULT 'tijd' CHECK (soort IN ('tijd','andere_waarde')),
+  geschatte_uren numeric,
+  marktcheck text,
+  interface_of_logboek boolean NOT NULL DEFAULT false,
+  maat text CHECK (maat IS NULL OR maat IN ('klein','middel','groot')),
+  prijs numeric,
+  prijs_reden text,
+  verwijderd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ngs_workflows_deal_idx ON ngs_workflows (deal_id) WHERE verwijderd_op IS NULL;
+CREATE INDEX IF NOT EXISTS ngs_workflows_project_idx ON ngs_workflows (project_id) WHERE project_id IS NOT NULL;
+ALTER TABLE ngs_workflows ENABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS ngs_audit_processen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id uuid NOT NULL REFERENCES ngs_deals(id) ON DELETE CASCADE,
+  workflow_id uuid REFERENCES ngs_workflows(id) ON DELETE SET NULL,
+  volgorde integer NOT NULL DEFAULT 0,
+  naam text NOT NULL,
+  betrokkenen jsonb NOT NULL DEFAULT '[]'::jsonb,
+  uren_per_week numeric NOT NULL DEFAULT 0,
+  notitie text,
+  verwijderd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ngs_audit_processen_deal_idx ON ngs_audit_processen (deal_id) WHERE verwijderd_op IS NULL;
+ALTER TABLE ngs_audit_processen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ngs_user_stories ADD COLUMN IF NOT EXISTS workflow_id uuid REFERENCES ngs_workflows(id) ON DELETE SET NULL;

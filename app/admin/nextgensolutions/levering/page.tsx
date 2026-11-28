@@ -13,5 +13,5 @@ export default async function NgsLeveringPagina({ searchParams }: { searchParams
   const [data, actor] = await Promise.all([laadLevering(createAdminSupabaseClient()), getActor()])
   // Wie enkel Levering mag (Uitvoerder Solutions) ziet geen tabbladen Pipeline en Cijfers.
   const verkoop = !!actor && actorCanSee(actor, 'nextgensolutions')
-  return <LeveringClient begin={data} verkoop={verkoop} openProject={typeof searchParams.project === 'string' ? searchParams.project : null} tab={searchParams.tab === 'care' ? 'care' : 'projecten'} />
+  return <LeveringClient begin={data} verkoop={verkoop} openProject={typeof searchParams.project === 'string' ? searchParams.project : null} tab={searchParams.tab === 'care' ? 'care' : searchParams.tab === 'audits' ? 'audits' : 'projecten'} />
 }

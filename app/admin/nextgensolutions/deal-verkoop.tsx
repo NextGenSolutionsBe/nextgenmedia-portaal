@@ -11,6 +11,7 @@ import { AUDIT_STAPPEN, leesChecklist, presentatieMinuten, faseLabel, type Deal 
 import { auditPrijs, type WerkingInstellingen } from '@/lib/werking/instellingen'
 import type { Vervolg } from '@/lib/ngs/server'
 import { Chip, dagKort, eur, inp, lbl, post, tijdstip } from './ui'
+import { RapportVenster } from './rapport'
 
 type Verkoop = WerkingInstellingen['verkoop']
 const lokaal = (iso: string | null) => { if (!iso) return ''; const d = new Date(iso); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16) }
@@ -102,6 +103,7 @@ export function BelpogingBlok({ deal, onVernieuw }: { deal: Deal; onVernieuw: ()
 /** De audit in het dealvenster: wat afgesproken is en de checklist (auditdag, briefing, rapport, presentatie). */
 export function AuditBlok({ deal, verkoop, onVernieuw }: { deal: Deal; verkoop: Verkoop; onVernieuw: () => void }) {
   const [bezig, setBezig] = useState<string | null>(null)
+  const [rapport, setRapport] = useState(false)
   if (!deal.auditdag_op && !deal.processen) return null
   const lijst = leesChecklist(deal.audit_checklist)
   const wie = (k: 'auditdag' | 'rapport') => (k === 'auditdag' ? verkoop.auditdag_door : verkoop.rapport_door)
@@ -111,10 +113,12 @@ export function AuditBlok({ deal, verkoop, onVernieuw }: { deal: Deal; verkoop: 
   }
   return (
     <section className="rounded-xl border border-blue-100 bg-blue-50/40 p-3.5 space-y-2.5">
-      <div className="flex items-baseline justify-between gap-2 flex-wrap">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-sm font-semibold">Audit</span>
-        <span className="text-xs text-gray-600">{deal.processen} {deal.processen === 1 ? 'proces' : 'processen'} · {eur(deal.audit_prijs ?? 0)}</span>
+        <span className="text-xs text-gray-600 flex-1">{deal.processen} {deal.processen === 1 ? 'proces' : 'processen'} · {eur(deal.audit_prijs ?? 0)}</span>
+        <button type="button" onClick={() => setRapport(true)} className="btn-secondary !py-1 text-xs"><FileText className="h-3.5 w-3.5" />Rapport</button>
       </div>
+      {rapport && <RapportVenster dealId={deal.id} onSluit={() => { setRapport(false); onVernieuw() }} />}
       <p className="text-xs text-gray-700">
         Auditdag {deal.auditdag_op ? dagKort(deal.auditdag_op) : '—'} · presentatie {deal.presentatie_op ? dagKort(deal.presentatie_op) : '—'} (± {presentatieMinuten(deal.processen, verkoop.presentatie_min_per_proces)} min)
         {deal.audit_buiten_app ? ' · voorstel buiten de app getekend' : deal.audit_contract_id ? ' · voorstel getekend in de app' : ''}
