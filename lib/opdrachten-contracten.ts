@@ -17,7 +17,7 @@ import { sluitContractTaak } from '@/lib/opdrachten-offertes'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Admin = { from: (t: string) => any }
-type Contract = { id: string; title: string | null; status: string | null; client_id: string | null; created_at: string | null; expires_at?: string | null; contract_type?: string | null }
+type Contract = { id: string; title: string | null; status: string | null; client_id: string | null; created_at: string | null; expires_at?: string | null; contract_type?: string | null; bedrijf?: string | null; ngs_deal_id?: string | null }
 
 const TESTKLANT = /^test$/i
 
@@ -40,9 +40,12 @@ export async function kaartVoorContract(admin: Admin, contractId: string, opties
     if (gekozen) await admin.from('opdrachten').update({ verantwoordelijke: gekozen, updated_at: new Date().toISOString() }).eq('id', (al as { id: string }[])[0].id)
     return 'bestaat'
   }
-  const { data: c } = await admin.from('contracts').select('id, title, status, client_id, created_at, expires_at, contract_type').eq('id', contractId).maybeSingle()
-  const contract = c as Contract | null
+  let r = await admin.from('contracts').select('id, title, status, client_id, created_at, expires_at, contract_type, bedrijf, ngs_deal_id').eq('id', contractId).maybeSingle()
+  if (r.error) r = await admin.from('contracts').select('id, title, status, client_id, created_at, expires_at, contract_type').eq('id', contractId).maybeSingle()
+  const contract = r.data as Contract | null
   if (!contract || String(contract.status ?? '').toLowerCase() === 'template') return 'overgeslagen'
+  // Nieuwe werking (28 nov 2026): Solutions staat enkel in de Pipeline, nooit op Projecten.
+  if (contract.bedrijf === 'nextgensolutions' || contract.ngs_deal_id) return 'overgeslagen'
 
   type Klant = { company_name?: string | null; sales_verantwoordelijke?: string | null }
   let klant: Klant | null = null
@@ -124,12 +127,12 @@ export async function kaartVoorContract(admin: Admin, contractId: string, opties
 /** Elk contract zonder kaart krijgt er een (bij het openen van het bord en na het aanmaken van een contract). */
 export async function zorgVoorContractKaarten(admin: Admin): Promise<number> {
   const [{ data: cs }, { data: os }] = await Promise.all([
-    admin.from('contracts').select('id, status').order('created_at', { ascending: false }).limit(1000),
+    admin.from('contracts').select('id, status, bedrijf').order('created_at', { ascending: false }).limit(1000),
     admin.from('opdrachten').select('contract_id').not('contract_id', 'is', null).limit(5000),
   ])
   const metKaart = new Set(((os ?? []) as { contract_id: string }[]).map((o) => o.contract_id))
-  const zonder = ((cs ?? []) as { id: string; status: string | null }[])
-    .filter((c) => !metKaart.has(c.id) && String(c.status ?? '').toLowerCase() !== 'template')
+  const zonder = ((cs ?? []) as { id: string; status: string | null; bedrijf?: string | null }[])
+    .filter((c) => !metKaart.has(c.id) && String(c.status ?? '').toLowerCase() !== 'template' && c.bedrijf !== 'nextgensolutions')
   let n = 0
   for (const c of zonder.slice(0, 25)) {
     try { if ((await kaartVoorContract(admin, c.id)) !== 'overgeslagen') n++ } catch (e) { console.warn('[opdrachten] kaart voor contract mislukt:', e instanceof Error ? e.message : e) }

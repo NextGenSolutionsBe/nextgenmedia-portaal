@@ -12,7 +12,7 @@ import { zorgVoorContractKaarten } from '@/lib/opdrachten-contracten'
 import { zorgVoorOfferteKaarten } from '@/lib/opdrachten-offertes'
 import {
   automatischeStatus, facturatieVan, kolomVan, verplaatsTekst, normaliseerDiensten, normaliseerVia, isBron, bronUitLead, PROJECT_VERANTWOORDELIJKEN, projectVerantwoordelijke,
-  isBedrijf, bedrijfVan, normaliseerBtw, ontbreektVoorFase,
+  isBedrijf, bedrijfVan, normaliseerBtw, ontbreektVoorFase, wordtSolutions, SOLUTIONS_NIET_OP_PROJECTEN,
   type Facturatie,
 } from '@/lib/opdrachten-kanban'
 import { laadAflettering } from '@/lib/contracten/aflettering-server'
@@ -226,7 +226,10 @@ export async function GET() {
       if (MIST.test(error.message)) return NextResponse.json({ opdrachten: [], klanten: [], contracten: [], facturen: [], hint: HINT })
       throw new Error(error.message)
     }
-    const rijen = (data ?? []) as Rij[]
+    // Nieuwe werking (28 nov 2026): een naar de Pipeline verhuisde Solutions-kaart blijft bewaard maar staat niet meer op het bord.
+    const { data: verhuisd } = await admin.from('opdrachten').select('id').eq('ngs_keuze', 'verhuisd')
+    const weg = new Set(((verhuisd ?? []) as { id: string }[]).map((x) => x.id))
+    const rijen = ((data ?? []) as Rij[]).filter((r) => !weg.has(r.id))
 
     const leadIds = [...new Set(rijen.map((r) => r.lead_id).filter(Boolean))] as string[]
     const [{ data: klantRijen }, { data: contractRijen }, { data: factuurRijen }, koppelingen, notities, { data: leadRijen }, offerteVan] = await Promise.all([
@@ -442,6 +445,7 @@ export async function POST(req: NextRequest) {
     if (rij.offerte_via && !rij.offerte_op && kolomVan(status) === 'offerte') rij.offerte_op = vandaagISO()
     if (!rij.datum) rij.datum = vandaagISO()
     if (!rij.merk) rij.merk = bedrijfVan(null, (rij.diensten as string[] | undefined) ?? [])
+    if (wordtSolutions(null, { merk: rij.merk as string, diensten: (rij.diensten as string[] | undefined) ?? [] })) return NextResponse.json({ error: SOLUTIONS_NIET_OP_PROJECTEN }, { status: 400 })
     const verplicht = await controleerVerplicht(admin, status, {
       client_id: clientId, klant_vrij: (rij.klant_vrij as string | null) ?? null,
       diensten: (rij.diensten as string[] | undefined) ?? [], btw_nummer: (rij.btw_nummer as string | null | undefined) ?? null,
@@ -515,6 +519,11 @@ export async function PATCH(req: NextRequest) {
 
     const fout = (await leesKoppelingen(admin, b, patch)) ?? leesKanban(b, patch)
     if (fout) return NextResponse.json({ error: fout }, { status: 400 })
+    if ('merk' in patch || 'diensten' in patch) {
+      const { data: huidig } = await admin.from('opdrachten').select('merk, diensten').eq('id', id).maybeSingle()
+      const h = huidig as { merk: string | null; diensten: string[] | null } | null
+      if (wordtSolutions(h, { merk: (patch.merk as string | null | undefined) ?? undefined, diensten: (patch.diensten as string[] | undefined) ?? undefined })) return NextResponse.json({ error: SOLUTIONS_NIET_OP_PROJECTEN }, { status: 400 })
+    }
 
     let oud: { status?: string; titel?: string } | null = null
     const { data: voorKlant } = await admin.from('opdrachten').select('client_id, klant_vrij').eq('id', id).maybeSingle()

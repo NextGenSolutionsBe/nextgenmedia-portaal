@@ -4,6 +4,7 @@
 
 ## Voortgang
 
+- **Fase 2: af en live (28 nov 2026).** Geen data omgezet; de 16 deals bleven in hun fase. De 12 Solutions-kaarten staan op de lijst bovenaan Projecten om te beslissen.
 - **Fase 1: af en live (28 nov 2026).** Yasmine en Jonathan hebben nog geen account; hun profiel en rechten komen vanzelf mee als jullie het account maken met hun sjabloon.
 
 ## Wat ik vond

@@ -4,7 +4,7 @@ import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { safeMessage } from '@/lib/api-error'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { leesAdminIdentiteit } from '@/lib/admin-identiteit'
-import { NgsFout, laadNgs, maakDeal, notities, verplaatsDeal, verwijderDeal, voegNotitieToe, wijzigDeal } from '@/lib/ngs/server'
+import { NgsFout, laadNgs, maakDeal, notities, verplaatsDeal, verwijderDeal, voegNotitieToe, wijzigDeal, zetVervolg, belpoging, auditStap, contractenVoorDeal } from '@/lib/ngs/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,7 +12,8 @@ export const dynamic = 'force-dynamic'
  * NextGenSolutions-pipeline. Toegang: module nextgensolutions (middleware per methode) en actief teamlid.
  *  GET            → alle deals en de opvolgtaken (laatst gekend)
  *  GET ?deal=<id> → de notities van één deal
- *  POST { actie: 'nieuw' | 'wijzig' | 'verplaats' | 'verwijder' | 'notitie', … }
+ *  GET ?contracten=<deal> → de contracten van de klant van de deal (getekend voorstel kiezen)
+ *  POST { actie: 'nieuw' | 'wijzig' | 'verplaats' | 'verwijder' | 'notitie' | 'vervolg' | 'belpoging' | 'auditstap', … }
  */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -28,6 +29,8 @@ export async function GET(req: NextRequest) {
     const admin = createAdminSupabaseClient()
     const deal = req.nextUrl.searchParams.get('deal')
     if (deal) return NextResponse.json({ notities: await notities(admin, deal) })
+    const contractenVan = req.nextUrl.searchParams.get('contracten')
+    if (contractenVan) return NextResponse.json({ contracten: await contractenVoorDeal(admin, contractenVan) })
     return NextResponse.json(await laadNgs(admin, await wie(user)), { headers: { 'Cache-Control': 'no-store' } })
   } catch (e) { return NextResponse.json({ error: safeMessage(e, 'ngs.GET') }, { status: 500 }) }
 }
@@ -46,7 +49,10 @@ export async function POST(req: NextRequest) {
     switch (b.actie) {
       case 'nieuw': { const nieuw = await maakDeal(admin, b, door); antwoord = { ok: true, id: nieuw }; samenvatting = `Deal ${String(b.bedrijf ?? '')}`; b.id = nieuw; break }
       case 'wijzig': await wijzigDeal(admin, moetId(), b, door); samenvatting = 'Deal aangepast'; break
-      case 'verplaats': { const d = await verplaatsDeal(admin, moetId(), b, door); antwoord = { ok: true, deal: d }; samenvatting = `Naar ${d.fase}`; break }
+      case 'verplaats': { const r = await verplaatsDeal(admin, moetId(), b, door); antwoord = { ok: true, deal: r.deal, waarschuwing: r.waarschuwing }; samenvatting = `Naar ${r.deal.fase}`; break }
+      case 'vervolg': await zetVervolg(admin, moetId(), b.vervolg_op, door); samenvatting = 'Vervolgafspraak'; break
+      case 'belpoging': { const r = await belpoging(admin, moetId(), b, door); antwoord = { ok: true, voorstel: r.voorstel }; samenvatting = `Belpoging: ${String(b.uitkomst ?? '')}`; break }
+      case 'auditstap': await auditStap(admin, moetId(), b.stap, b.aan, door); samenvatting = `Audit: ${String(b.stap ?? '')}`; break
       case 'verwijder': await verwijderDeal(admin, moetId(), door); samenvatting = 'Deal verwijderd'; break
       case 'notitie': await voegNotitieToe(admin, moetId(), b.tekst, door); samenvatting = 'Notitie'; break
       default: throw new NgsFout('Onbekende actie.')

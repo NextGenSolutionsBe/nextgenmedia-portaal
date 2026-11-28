@@ -122,7 +122,7 @@ export function VerplaatsDialoog({ o, soort, doel = 'offerte', contracten, onClo
                 <div>
                   <p className="text-xs font-medium text-gray-600 mb-1">Dienst</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {DIENSTEN.map((d) => {
+                    {DIENSTEN.filter((d) => d.key !== 'ngs' || diensten.includes('ngs')).map((d) => {
                       const aan = diensten.includes(d.key as string)
                       return (
                         <button key={d.key} type="button" onClick={() => setDiensten((l) => (aan ? l.filter((x) => x !== d.key) : [...l, d.key as string]))}

@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ArrowRight, CalendarClock, Check, Plus, Search, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CalendarClock, Check, Plus, Search, X } from 'lucide-react'
 import { zoekVeld } from '@/lib/zoekveld'
 import {
-  FASES, cijfersVoor, dealWaarde, isOpen, periodeVan, sorteerKolom, volgendeOpvolging, wanneer, zoekDeal,
+  FASES, cijfersVoor, dealWaarde, isOpen, periodeVan, sorteerKolom, volgendeOpvolging, wanneer, zoekDeal, isOpvolgFase, vervolgVan, vervolgOntbreekt, leesChecklist, AUDIT_STAPPEN,
   type Deal, type Fase,
 } from '@/lib/ngs/model'
-import type { NgsData } from '@/lib/ngs/server'
+import type { NgsData, Vervolg } from '@/lib/ngs/server'
 import { DealVenster, VerplaatsVenster } from './deal-venster'
 import { FASE_STIJL, Kop, dagKort, eur, post, tijdstip } from './ui'
 import { PersoonKnop } from '@/components/admin/persoon-foto'
@@ -21,9 +21,10 @@ const RECENT_DAGEN = 90
 const initialen = (naam: string | null) => (naam ?? '').split(/\s+/).filter(Boolean).slice(0, 2).map((x) => x[0]!.toUpperCase()).join('') || '?'
 
 /**
- * De pipeline van NextGenSolutions: Afspraak → Voorstel maken → Opvolgen →
- * Closed Won / Closed Lost. Slepen tussen kolommen (computer) of de knop op de
- * kaart (gsm). Naar Opvolgen = meteen zeggen wanneer, dat wordt een ClickUp-taak.
+ * De pipeline van NextGenSolutions (nieuwe werking, 28 nov 2026): Afspraak →
+ * Voorstel → Opvolgen voorstel → Audit → Opvolgen rapport → Closed Won / Lost.
+ * Slepen tussen kolommen (computer) of de knop op de kaart (gsm). Naar Voorstel
+ * = de vervolgafspraak, naar Audit = processen, prijs en data, opvolgen = een taak.
  */
 export function PipelineClient({ begin, vandaag, openDeal }: { begin: NgsData; vandaag: string; openDeal: string | null }) {
   const router = useRouter()
@@ -46,6 +47,8 @@ export function PipelineClient({ begin, vandaag, openDeal }: { begin: NgsData; v
     setData(j as NgsData)
     return j as NgsData
   }, [])
+  // Terug van de Meeting Inplanner (nieuw tabblad): de vervolgafspraak meteen tonen.
+  useEffect(() => { const f = () => { herlaad() }; window.addEventListener('focus', f); return () => window.removeEventListener('focus', f) }, [herlaad])
   // Het venster volgt de verse gegevens van de deal.
   useEffect(() => {
     setOpen((o) => (o?.soort === 'deal' && o.deal ? { soort: 'deal', deal: data.deals.find((d) => d.id === o.deal!.id) ?? o.deal } : o))
@@ -65,10 +68,6 @@ export function PipelineClient({ begin, vandaag, openDeal }: { begin: NgsData; v
 
   const verplaats = async (d: Deal, naar: Fase) => {
     if (d.fase === naar) return
-    if (naar === 'voorstel') {
-      try { await post({ actie: 'verplaats', id: d.id, naar }); toast.success(`${d.bedrijf} staat in Voorstel maken.`); setOpen(null); herlaad() } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') }
-      return
-    }
     setOpen({ soort: 'verplaats', deal: d, naar })
   }
 
@@ -89,7 +88,7 @@ export function PipelineClient({ begin, vandaag, openDeal }: { begin: NgsData; v
   }
 
   const deze = cijfersVoor(data.deals, periodeVan('maand', vandaag.slice(0, 7)))
-  const opvolgStand = data.deals.filter((d) => d.fase === 'opvolgen').reduce((s, d) => {
+  const opvolgStand = data.deals.filter((d) => isOpvolgFase(d.fase)).reduce((s, d) => {
     const o = opvolging.get(d.id)
     if (!o) s.zonder++
     else if (o < vandaag) s.telaat++
@@ -142,28 +141,28 @@ export function PipelineClient({ begin, vandaag, openDeal }: { begin: NgsData; v
       </div>
       <div className="lg:hidden">
         <Kolom fase={mobiel} {...kolom(mobiel)} vandaag={vandaag} opvolging={opvolging} sleep={null} boven={false}
-          onOpen={(d) => setOpen({ soort: 'deal', deal: d })} onVerplaats={verplaats} onAlles={() => setAlles((a) => ({ ...a, [mobiel]: !a[mobiel] }))} alles={!!alles[mobiel]} />
+          onOpen={(d) => setOpen({ soort: 'deal', deal: d })} onVerplaats={verplaats} onAlles={() => setAlles((a) => ({ ...a, [mobiel]: !a[mobiel] }))} alles={!!alles[mobiel]} vervolg={data.vervolg ?? {}} />
       </div>
 
       {/* Computer: alle fases naast elkaar, slepen kan */}
-      <div className="hidden lg:grid grid-cols-5 gap-3 items-start">
+      <div className="hidden lg:flex gap-3 items-start overflow-x-auto pb-2">
         {FASES.map((f) => (
-          <div key={f.key}
+          <div key={f.key} className="w-[236px] shrink-0"
             onDragOver={(e) => { if (sleep) { e.preventDefault(); setBoven(f.key) } }}
             onDragLeave={() => setBoven((b) => (b === f.key ? null : b))}
             onDrop={(e) => { e.preventDefault(); const d = data.deals.find((x) => x.id === sleep); setSleep(null); setBoven(null); if (d) verplaats(d, f.key) }}>
             <Kolom fase={f.key} {...kolom(f.key)} vandaag={vandaag} opvolging={opvolging} sleep={sleep} boven={boven === f.key}
               onOpen={(d) => setOpen({ soort: 'deal', deal: d })} onVerplaats={verplaats} onSleep={setSleep}
-              onAlles={() => setAlles((a) => ({ ...a, [f.key]: !a[f.key] }))} alles={!!alles[f.key]} />
+              onAlles={() => setAlles((a) => ({ ...a, [f.key]: !a[f.key] }))} alles={!!alles[f.key]} vervolg={data.vervolg ?? {}} />
           </div>
         ))}
       </div>
 
       {open?.soort === 'deal' && (
         <DealVenster deal={open.deal} ik={data.ik ? data.ik.split(' ')[0] : null} namen={namen} onSluit={() => setOpen(null)} onKlaar={klaar}
-          onVernieuw={() => { herlaad() }} onVerplaats={verplaats} />
+          onVernieuw={() => { herlaad() }} onVerplaats={verplaats} vervolg={open.deal ? data.vervolg?.[open.deal.id] ?? null : null} verkoop={data.verkoop} />
       )}
-      {open?.soort === 'verplaats' && <VerplaatsVenster deal={open.deal} naar={open.naar} onSluit={() => setOpen(null)} onKlaar={(m) => klaar(m)} />}
+      {open?.soort === 'verplaats' && <VerplaatsVenster deal={open.deal} naar={open.naar} verkoop={data.verkoop} onSluit={() => setOpen(null)} onKlaar={(m) => klaar(m)} />}
     </div>
   )
 }
@@ -179,13 +178,16 @@ function Tegel({ label, waarde, sub, rood }: { label: string; waarde: string; su
 }
 
 const VOLGENDE: Partial<Record<Fase, { naar: Fase; label: string }>> = {
-  afspraak: { naar: 'voorstel', label: 'Voorstel maken' },
+  afspraak: { naar: 'voorstel', label: 'Voorstel' },
   voorstel: { naar: 'opvolgen', label: 'Opvolgen' },
+  opvolgen: { naar: 'audit', label: 'Audit' },
+  audit: { naar: 'opvolgen_rapport', label: 'Rapport opvolgen' },
 }
 
-function Kolom({ fase, toon, ouder, vandaag, opvolging, sleep, boven, onOpen, onVerplaats, onSleep, onAlles, alles }: {
+function Kolom({ fase, toon, ouder, vandaag, opvolging, sleep, boven, onOpen, onVerplaats, onSleep, onAlles, alles, vervolg }: {
   fase: Fase; toon: Deal[]; ouder: number; vandaag: string; opvolging: Map<string, string>; sleep: string | null; boven: boolean
   onOpen: (d: Deal) => void; onVerplaats: (d: Deal, naar: Fase) => void; onSleep?: (id: string | null) => void; onAlles: () => void; alles: boolean
+  vervolg: Record<string, Vervolg>
 }) {
   const f = FASES.find((x) => x.key === fase)!
   const som = toon.reduce((s, d) => s + dealWaarde(d), 0)
@@ -196,7 +198,7 @@ function Kolom({ fase, toon, ouder, vandaag, opvolging, sleep, boven, onOpen, on
         <span className="text-[11px] text-gray-500 tabular-nums">{eur(som)}</span>
       </div>
       <div className="space-y-2 min-h-[60px]">
-        {toon.map((d) => <Kaart key={d.id} d={d} vandaag={vandaag} opvolging={opvolging.get(d.id) ?? null} sleept={sleep === d.id} onOpen={() => onOpen(d)} onVerplaats={(n) => onVerplaats(d, n)} onSleep={onSleep} />)}
+        {toon.map((d) => <Kaart key={d.id} d={d} vandaag={vandaag} opvolging={opvolging.get(d.id) ?? null} vervolg={vervolg[d.id] ?? null} sleept={sleep === d.id} onOpen={() => onOpen(d)} onVerplaats={(n) => onVerplaats(d, n)} onSleep={onSleep} />)}
         {toon.length === 0 && <p className="text-xs text-gray-400 px-2 py-3 text-center">{sleep ? 'Sleep hierheen' : fase === 'won' || fase === 'lost' ? `Niets de laatste ${RECENT_DAGEN} dagen` : 'Leeg'}</p>}
       </div>
       {(ouder > 0 || alles) && (fase === 'won' || fase === 'lost') && (
@@ -206,9 +208,13 @@ function Kolom({ fase, toon, ouder, vandaag, opvolging, sleep, boven, onOpen, on
   )
 }
 
-function Kaart({ d, vandaag, opvolging, sleept, onOpen, onVerplaats, onSleep }: {
-  d: Deal; vandaag: string; opvolging: string | null; sleept: boolean; onOpen: () => void; onVerplaats: (naar: Fase) => void; onSleep?: (id: string | null) => void
+function Kaart({ d, vandaag, opvolging, vervolg, sleept, onOpen, onVerplaats, onSleep }: {
+  d: Deal; vandaag: string; opvolging: string | null; vervolg: Vervolg | null; sleept: boolean; onOpen: () => void; onVerplaats: (naar: Fase) => void; onSleep?: (id: string | null) => void
 }) {
+  const vv = vervolgVan(d, vervolg)
+  const geenVervolg = vervolgOntbreekt(d, vv, new Date().toISOString())
+  const lijst = leesChecklist(d.audit_checklist)
+  const klaarStappen = AUDIT_STAPPEN.filter((s) => lijst[s.key]).length
   const volgende = VOLGENDE[d.fase]
   const w = opvolging ? wanneer(opvolging, vandaag) : null
   const bedragen = [d.waarde_eenmalig ? eur(d.waarde_eenmalig) : null, d.waarde_maandelijks ? `${eur(d.waarde_maandelijks)}/m` : null].filter(Boolean).join(' + ')
@@ -225,19 +231,21 @@ function Kaart({ d, vandaag, opvolging, sleept, onOpen, onVerplaats, onSleep }: 
         {d.fase === 'afspraak' && (d.afspraak_op
           ? <p className={`text-[11px] inline-flex items-center gap-1 ${d.afspraak_op.slice(0, 10) < vandaag ? 'text-amber-700' : 'text-gray-600'}`}><CalendarClock className="h-3 w-3" />{tijdstip(d.afspraak_op)}</p>
           : <p className="text-[11px] text-gray-400">Nog geen datum</p>)}
-        {d.fase === 'opvolgen' && (w
+        {d.fase === 'voorstel' && (geenVervolg
+          ? <p className="text-[11px] font-medium text-amber-800 bg-amber-50 rounded px-1.5 py-0.5 inline-flex items-center gap-1"><AlertTriangle className="h-3 w-3" />Geen vervolgafspraak</p>
+          : <p className="text-[11px] text-gray-700 inline-flex items-center gap-1"><CalendarClock className="h-3 w-3" />Vervolgafspraak {tijdstip(vv!)}</p>)}
+        {isOpvolgFase(d.fase) && (w
           ? <p className={`text-[11px] font-medium ${w.telaat ? 'text-red-600' : w.vandaag ? 'text-amber-700' : 'text-gray-600'}`}>Opvolgen {w.tekst}{!w.telaat && !w.vandaag ? ` (${dagKort(opvolging!)})` : ''}</p>
           : <p className="text-[11px] text-amber-700">Geen opvolgtaak</p>)}
+        {d.fase === 'audit' && <p className="text-[11px] text-blue-900">{d.auditdag_op ? `Auditdag ${dagKort(d.auditdag_op)}` : 'Auditdag?'}{d.presentatie_op ? ` · rapport ${dagKort(d.presentatie_op)}` : ''} · {klaarStappen}/{AUDIT_STAPPEN.length}</p>}
         {d.fase === 'won' && d.gewonnen_op && <p className="text-[11px] text-green-700">Gewonnen {dagKort(d.gewonnen_op)} · {eur(dealWaarde(d))}</p>}
         {d.fase === 'lost' && <p className="text-[11px] text-gray-500 line-clamp-1">{d.verloren_reden}</p>}
       </button>
       {isOpen(d.fase) && (
         <div className="flex gap-1 px-2 pb-2 -mt-0.5">
           {volgende && <button type="button" onClick={() => onVerplaats(volgende.naar)} className="flex-1 h-8 rounded-lg text-[11px] font-medium bg-gray-50 hover:bg-gray-100 text-gray-800 inline-flex items-center justify-center gap-1">{volgende.label}<ArrowRight className="h-3 w-3" /></button>}
-          {d.fase === 'opvolgen' && <>
-            <button type="button" onClick={() => onVerplaats('won')} className="flex-1 h-8 rounded-lg text-[11px] font-medium bg-green-50 hover:bg-green-100 text-green-800 inline-flex items-center justify-center gap-1"><Check className="h-3 w-3" />Won</button>
-            <button type="button" onClick={() => onVerplaats('lost')} className="flex-1 h-8 rounded-lg text-[11px] font-medium bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center gap-1"><X className="h-3 w-3" />Lost</button>
-          </>}
+          {d.fase === 'opvolgen_rapport' && <button type="button" onClick={() => onVerplaats('won')} className="flex-1 h-8 rounded-lg text-[11px] font-medium bg-green-50 hover:bg-green-100 text-green-800 inline-flex items-center justify-center gap-1"><Check className="h-3 w-3" />Won</button>}
+          {isOpvolgFase(d.fase) && <button type="button" onClick={() => onVerplaats('lost')} className="flex-1 h-8 rounded-lg text-[11px] font-medium bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center gap-1"><X className="h-3 w-3" />Lost</button>}
         </div>
       )}
     </article>

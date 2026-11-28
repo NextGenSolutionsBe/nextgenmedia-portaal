@@ -294,7 +294,7 @@ export async function maakKaartUitMail(
   admin: Admin, id: string,
   b: { titel?: unknown; klant?: unknown; client_id?: unknown; diensten?: unknown; merk?: unknown; verantwoordelijke?: unknown },
   door: { email: string | null; naam: string | null },
-): Promise<{ opdrachtId: string }> {
+): Promise<{ opdrachtId: string | null; dealId?: string }> {
   const { data } = await admin.from('mail_projecten').select('*').eq('id', id).maybeSingle()
   const r = data as (Record<string, unknown> & { status: MailProjectStatus; opdracht_id: string | null }) | null
   if (!r) throw new MailProjectFout('Voorstel niet gevonden.', 404)
@@ -324,6 +324,27 @@ export async function maakKaartUitMail(
     const n = nog as { status: string; opdracht_id: string | null } | null
     if (n?.status === 'ja' && n.opdracht_id) return { opdrachtId: n.opdracht_id }
     throw new MailProjectFout('Hierover werd net al beslist.', 409)
+  }
+
+  // Nieuwe werking (28 nov 2026): Solutions staat enkel in de Pipeline. Ja = een deal in Afspraak, geen kaart op Projecten.
+  if (merk === 'nextgensolutions') {
+    const naamKlant = clientId ? ((await admin.from('clients').select('company_name').eq('id', clientId).maybeSingle()).data as { company_name?: string | null } | null)?.company_name ?? klantVrij : klantVrij
+    const info = [titel, (r.samenvatting as string | null) ?? null].filter(Boolean).join('\n')
+    const { data: deal, error: dealFout } = await admin.from('ngs_deals').insert({
+      bedrijf: String(naamKlant || titel).slice(0, 160), contactpersoon: contact.naam, email: contact.email, telefoon: contact.telefoon,
+      titel: info.slice(0, 2000), diensten: [], fase: 'afspraak', fase_sinds: nu, bron: 'inbound_website', verantwoordelijke, client_id: clientId, created_by: door.naam ?? door.email,
+    }).select('id').single()
+    if (dealFout || !deal) {
+      await admin.from('mail_projecten').update({ status: 'voorstel', beslist_door: null, beslist_op: null, updated_at: new Date().toISOString() }).eq('id', id)
+      throw new MailProjectFout(`De deal kon niet gemaakt worden: ${dealFout?.message ?? 'onbekende fout'}`, 500)
+    }
+    const dealId = String((deal as { id: string }).id)
+    await admin.from('ngs_deal_notities').insert({ deal_id: dealId, soort: 'systeem', door: door.naam ?? door.email, tekst: kaartNotitie({
+      van: (r.van as string | null) ?? null, vanNaam: (r.van_naam as string | null) ?? null, onderwerp: (r.onderwerp as string | null) ?? null,
+      ontvangen: r.ontvangen_op as string, samenvatting: (r.samenvatting as string | null) ?? null, project: (r.project as string | null) ?? null,
+    }) }).then(() => null, () => null)
+    await admin.from('ngs_deal_fases').insert({ deal_id: dealId, van: null, naar: 'afspraak', door: door.naam ?? door.email }).then(() => null, () => null)
+    return { opdrachtId: null, dealId }
   }
 
   const rij: Record<string, unknown> = {

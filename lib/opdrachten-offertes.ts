@@ -62,6 +62,8 @@ async function naarOfferte(admin: Admin, kaartId: string, o: OfferteRij, auteur:
 export async function kaartVoorOfferte(admin: Admin, offerteId: string, auteur: Auteur = null): Promise<{ opdrachtId: string | null; actie: 'bestaat' | 'verplaatst' | 'gekoppeld' | 'aangemaakt' | 'overgeslagen' }> {
   const o = await leesOfferte(admin, offerteId)
   if (!o || o.status === 'ingetrokken') return { opdrachtId: o?.opdracht_id ?? null, actie: 'overgeslagen' }
+  // Nieuwe werking (28 nov 2026): een offerte van NextGenSolutions maakt geen kaart op Projecten (Solutions = enkel de Pipeline).
+  if (o.merk === 'nextgensolutions' && !o.opdracht_id) return { opdrachtId: null, actie: 'overgeslagen' }
 
   let klantNaam = o.klant_naam
   let verantwoordelijke: string | null = null

@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
         template_id: templateId,
         service_slug,
         bedrijf,
+        ...(typeof b.ngs_deal_id === 'string' && /^[0-9a-f-]{36}$/i.test(b.ngs_deal_id) ? { ngs_deal_id: b.ngs_deal_id } : {}),
         status: 'draft',
         signer_name,
         signer_email,
@@ -104,6 +105,10 @@ export async function POST(req: NextRequest) {
     } catch { }
 
     // Projecten: een contract opmaken zet meteen een kaart in "Contract verstuurd".
+    if (typeof b.ngs_deal_id === 'string' && /^[0-9a-f-]{36}$/i.test(b.ngs_deal_id)) {
+      // Voorstel voor een deal van NextGenSolutions: een regel in de tijdlijn van de deal.
+      await admin.from('ngs_deal_notities').insert({ deal_id: b.ngs_deal_id, tekst: `Voorstel opgemaakt: ${finalTitle}`, soort: 'systeem', door: user.email ?? null }).then(() => null, () => null)
+    }
     const opdrachtVan = typeof b.opdracht_id === 'string' && /^[0-9a-f-]{36}$/i.test(b.opdracht_id) ? b.opdracht_id : null
     await kaartVoorContract(admin, contractId, { opdrachtId: opdrachtVan, verantwoordelijke: typeof b.verantwoordelijke === 'string' ? b.verantwoordelijke : null }).catch((e) => console.warn('[contracts] kaart voor contract:', e instanceof Error ? e.message : e))
     return NextResponse.json({ id: contractId })

@@ -361,6 +361,18 @@ export const BEDRIJVEN: { key: Bedrijf; label: string; kort: string }[] = [
 export const isBedrijf = (v: unknown): v is Bedrijf => BEDRIJVEN.some((b) => b.key === v)
 export const bedrijfLabel = (v: string | null | undefined): string => BEDRIJVEN.find((b) => b.key === v)?.label ?? 'NextGenMedia'
 
+/**
+ * Nieuwe werking (28 nov 2026): Solutions staat enkel in de Pipeline. Een nieuwe
+ * kaart kan geen NextGenSolutions of AI-automatisatie zijn, en een bestaande
+ * kaart wordt het niet. Kaarten die het al waren blijven zoals ze zijn.
+ */
+export const SOLUTIONS_NIET_OP_PROJECTEN = 'Solutions staat enkel in de Pipeline van NextGenSolutions. Maak daar een deal.'
+export function wordtSolutions(voor: { merk?: string | null; diensten?: string[] | null } | null, na: { merk?: string | null; diensten?: string[] | null }): boolean {
+  const nu = bedrijfVan(na.merk ?? voor?.merk ?? null, na.diensten ?? voor?.diensten ?? []) === 'nextgensolutions'
+  const was = !!voor && bedrijfVan(voor.merk ?? null, voor.diensten ?? []) === 'nextgensolutions'
+  return nu && !was
+}
+
 /** Het bedrijf van een kaart: zoals ingesteld, anders afgeleid uit de diensten (NGS-dienst → NGS, Founders → FoF, anders NGM). */
 export function bedrijfVan(merk: string | null | undefined, diensten: string[] | null | undefined): Bedrijf {
   if (isBedrijf(merk)) return merk

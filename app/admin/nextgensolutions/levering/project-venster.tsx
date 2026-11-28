@@ -106,7 +106,7 @@ function Getal({ label, waarde, sub, rood }: { label: string; waarde: string; su
 
 type Doe = (body: Record<string, unknown>, sleutel: string, ok?: string) => Promise<Record<string, unknown> | null>
 
-/** Tijdscan: datum, notities met sjabloon, inplannen en een AI-voorstel voor briefing en stories. */
+/** Audit (vroeger tijdscan): datum, notities met sjabloon, inplannen en een AI-voorstel voor briefing en stories. */
 function Tijdscan({ p, klantId, bezig, doe, stories }: { p: Project; klantId: string | null; bezig: string | null; doe: Doe; stories: UserStory[] }) {
   const [datum, setDatum] = useState(p.tijdscan_op ?? '')
   const [notities, setNotities] = useState(p.tijdscan_notities ?? TIJDSCAN_SJABLOON)
@@ -121,10 +121,10 @@ function Tijdscan({ p, klantId, bezig, doe, stories }: { p: Project; klantId: st
   }
   const briefingLeeg = BRIEFING_VELDEN.filter((v) => voorstel?.briefing[v.key] && !p.briefing[v.key])
   return (
-    <Sectie titel="Tijdscan" sub={p.tijdscan_op ? `op ${dagKort(p.tijdscan_op)}` : 'nog niet gehouden'} open={p.fase === 'briefing' && !p.briefing_bevestigd_op}>
+    <Sectie titel="Audit" sub={p.tijdscan_op ? `op ${dagKort(p.tijdscan_op)}` : 'nog niet gehouden'} open={p.fase === 'briefing' && !p.briefing_bevestigd_op}>
       <div className="flex flex-wrap gap-2 items-end">
-        <label className="block"><span className={lbl}>Datum van de tijdscan</span><input type="date" className={inp} value={datum} onChange={(e) => setDatum(e.target.value)} /></label>
-        <Link href={`/admin/meetings?plan=1${klantId ? `&klant=${klantId}` : ''}`} className="btn-secondary !py-2 !text-sm"><CalendarPlus className="h-4 w-4" />Tijdscan inplannen</Link>
+        <label className="block"><span className={lbl}>Datum van de audit</span><input type="date" className={inp} value={datum} onChange={(e) => setDatum(e.target.value)} /></label>
+        <Link href={`/admin/meetings?plan=1${klantId ? `&klant=${klantId}` : ''}`} className="btn-secondary !py-2 !text-sm"><CalendarPlus className="h-4 w-4" />Audit inplannen</Link>
       </div>
       <label className="block">
         <span className={lbl}>Notities</span>
