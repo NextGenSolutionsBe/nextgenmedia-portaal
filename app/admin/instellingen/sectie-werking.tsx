@@ -131,6 +131,45 @@ export function SectieWerking({ ctx }: { ctx: Ctx }) {
         </Rij>
       </Groep>
 
+      <Groep titel="Media: pakketten social media">
+        <p className="text-[12px] text-gray-500 -mt-1 mb-2">Prijzen per maand, excl. btw. Een pakket in de offerte vult het prijsblok, de fiche en de deliverables.</p>
+        <div className="space-y-2">
+          {v.media.pakketten.map((p, i) => {
+            const zetP = (w: Partial<typeof p>) => zet('media', { pakketten: v.media.pakketten.map((x, j) => (j === i ? { ...x, ...w } : x)) })
+            return (
+              <div key={p.key} className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-end">
+                <Veld label="Pakket"><input className={INP} value={p.naam} maxLength={30} disabled={uit} onChange={(e) => zetP({ naam: e.target.value })} /></Veld>
+                <Getal label="Prijs" eenheid="€" value={p.prijs} min={0} onChange={(w) => zetP({ prijs: w })} />
+                <Getal label="Posts" value={p.posts} min={0} onChange={(w) => zetP({ posts: w })} />
+                <Getal label="Reels" value={p.reels} min={0} onChange={(w) => zetP({ reels: w })} />
+                <Getal label="Extra stories" value={p.stories} min={0} onChange={(w) => zetP({ stories: w })} />
+              </div>
+            )
+          })}
+        </div>
+        <Veld label="Bij elk pakket inbegrepen (één per regel)">
+          <textarea className={INP} rows={3} disabled={uit} value={v.media.inbegrepen.join('\n')} onChange={(e) => zet('media', { inbegrepen: e.target.value.split('\n') })} />
+        </Veld>
+        <Rij>
+          <Getal label={v.media.community_management.naam} eenheid="€/maand" value={v.media.community_management.prijs} min={0} onChange={(w) => zet('media', { community_management: { ...v.media.community_management, prijs: w } })} hint={v.media.community_management.uitleg} />
+          <Getal label="Goedkeuring" eenheid="dagen" value={v.media.goedkeuring_dagen} min={1} max={60} onChange={(w) => zet('media', { goedkeuring_dagen: w })} hint="Zo lang heeft de klant om goed te keuren." />
+          <Getal label="Aanpassingsrondes per post" value={v.media.rondes} min={0} max={10} onChange={(w) => zet('media', { rondes: w })} hint="Een ronde meer vraagt een bevestiging van het team." />
+          <Getal label="Eerste contract" eenheid="maanden" value={v.media.looptijd_eerste_maanden} min={1} onChange={(w) => zet('media', { looptijd_eerste_maanden: w })} />
+          <Getal label="Verlenging" eenheid="maanden" value={v.media.verlenging_maanden} min={1} onChange={(w) => zet('media', { verlenging_maanden: w })} />
+          <Veld label="Template voor de verlenging (id)" hint="Uit Klantcontracten → Templates. Leeg = je kiest de template zelf."><input className={INP} value={v.media.verlenging_template_id ?? ''} disabled={uit} onChange={(e) => zet('media', { verlenging_template_id: e.target.value.trim() || null })} /></Veld>
+        </Rij>
+        <div className="mt-3 space-y-2">
+          <div className="text-xs font-medium text-gray-600">Losse foto en video (offerte-items)</div>
+          {v.media.losse_items.map((x, i) => (
+            <div key={x.key} className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
+              <div className="text-sm pb-2 col-span-2 sm:col-span-2">{x.naam}</div>
+              <Getal label={`Per ${x.eenheid}`} eenheid="€" value={x.prijs} min={0} onChange={(w) => zet('media', { losse_items: v.media.losse_items.map((y, j) => (j === i ? { ...y, prijs: w } : y)) })} />
+              <label className="flex items-center gap-2 text-sm pb-2"><input type="checkbox" checked={x.bevestigd} disabled={uit} onChange={(e) => zet('media', { losse_items: v.media.losse_items.map((y, j) => (j === i ? { ...y, bevestigd: e.target.checked } : y)) })} />Bevestigd</label>
+            </div>
+          ))}
+        </div>
+      </Groep>
+
       <Groep titel="Care-pakketten (Solutions)">
         <p className="text-[12px] text-gray-500 -mt-1 mb-2">{v.care.bevestigd ? 'Bevestigd.' : 'Dit is het voorstel uit de opdracht en nog niet bevestigd.'} Reactietijd in werkuren: één werkdag = de werkuren hieronder.</p>
         <div className="space-y-3">

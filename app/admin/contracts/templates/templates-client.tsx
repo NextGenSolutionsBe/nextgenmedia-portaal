@@ -44,6 +44,14 @@ export function TemplatesClient({
   const [delTpl, setDelTpl] = useState<Template | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [typesOpen, setTypesOpen] = useState(false)
+  // ?template=<id> opent die template meteen (bv. de verlengingstemplate vanuit het verlengingsgesprek).
+  useEffect(() => {
+    try {
+      const id = new URLSearchParams(window.location.search).get('template')
+      const t = id ? initialTemplates.find((x) => x.id === id && x.pdf_path) : null
+      if (t) setUseTpl(t)
+    } catch { /* geen parameter */ }
+  }, [initialTemplates])
 
   const toggleActive = async (t: Template) => {
     try {

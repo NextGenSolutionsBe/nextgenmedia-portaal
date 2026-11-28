@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  Inbox, FileText, CalendarClock, KanbanSquare, MessageSquare, Wrench, PackageCheck, Send, ArrowRight, PenLine, Receipt, Mail, ListPlus, ListChecks, X, RefreshCw, Hammer,
+  Inbox, FileText, CalendarClock, KanbanSquare, MessageSquare, Wrench, PackageCheck, Send, ArrowRight, PenLine, Receipt, Mail, ListPlus, ListChecks, X, RefreshCw, Hammer, Camera,
 } from 'lucide-react'
 import type { OpvolgGroep, OpvolgItem } from '@/lib/notifications'
 import { dagLangNaam, standaardTaakDag, type LabelToon, type OpvolgLabel } from '@/lib/opvolging-label'
@@ -14,7 +14,7 @@ import { NieuweTaak } from '@/components/admin/clickup-taken'
 // namen en per regel wanneer het moet gebeuren. Elke regel kan een taak krijgen
 // (ClickUp en Taken in de app); dan telt de datum van die taak.
 const ICOON: Record<OpvolgGroep['key'], React.ElementType> = {
-  aanvragen: Inbox, contracten: FileText, tegentekenen: PenLine, meetings: CalendarClock, projecten: KanbanSquare, content: MessageSquare, onderhoud: Wrench, opleveringen: PackageCheck, offertes: Send, facturen: Receipt, mails: Mail, verlengen: RefreshCw, levering: Hammer,
+  aanvragen: Inbox, contracten: FileText, tegentekenen: PenLine, meetings: CalendarClock, projecten: KanbanSquare, content: MessageSquare, onderhoud: Wrench, opleveringen: PackageCheck, offertes: Send, facturen: Receipt, mails: Mail, verlengen: RefreshCw, levering: Hammer, shoots: Camera,
 }
 
 const TOON: Record<LabelToon, string> = {

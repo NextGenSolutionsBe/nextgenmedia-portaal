@@ -53,6 +53,28 @@ export type WerkingInstellingen = {
   levering: { bouw_dagen: number; nazorg_weken: number; nazorg_call_min: number; verantwoordelijke: string }
   /** Care (fase 6): pakketten, werkuren voor de reactietijd en de prijs van een migratie. `bevestigd` = de zaakvoerders keurden de pakketten goed. */
   care: { pakketten: CarePakket[]; werkdag_van: string; werkdag_tot: string; migratie_vanaf: number; bevestigd: boolean }
+  /** Media (fase 7): pakketten social media, Community management, losse foto en video, goedkeuring en looptijd. */
+  media: MediaInstellingen
+}
+
+export const MEDIA_PAKKET_KEYS = ['klein', 'middel', 'groot'] as const
+export type MediaPakketKey = (typeof MEDIA_PAKKET_KEYS)[number]
+export type MediaPakket = { key: MediaPakketKey; naam: string; prijs: number; posts: number; reels: number; stories: number }
+export type LosItem = { key: string; naam: string; prijs: number; eenheid: string; bevestigd: boolean }
+export type MediaInstellingen = {
+  pakketten: MediaPakket[]
+  /** Bij elk pakket inbegrepen (één per regel op de offerte). */
+  inbegrepen: string[]
+  community_management: { naam: string; prijs: number; uitleg: string }
+  losse_items: LosItem[]
+  /** Dagen die de klant heeft om goed te keuren. */
+  goedkeuring_dagen: number
+  /** Aanpassingsrondes per post; daarna vraagt een ronde een bevestiging van het team. */
+  rondes: number
+  looptijd_eerste_maanden: number
+  verlenging_maanden: number
+  /** De contracttemplate voor het verlengingsgesprek (Contract uit template). */
+  verlenging_template_id: string | null
 }
 
 export const CARE_PAKKET_KEYS = ['basis', 'plus', 'pro'] as const
@@ -93,6 +115,23 @@ export const STANDAARD_WERKING: WerkingInstellingen = {
       { key: 'pro', naam: 'Pro', prijs: 349, db_gb: 8, bestanden_gb: 100, reactie_werkuren: 4, uren_per_maand: 3, monitoring: true, maandrapport: true },
     ],
     werkdag_van: '09:00', werkdag_tot: '17:00', migratie_vanaf: 250, bevestigd: false,
+  },
+  // Uit de opdracht van 28 nov 2026. Video per uur is bevestigd; foto per uur en de halve dagen zijn een voorstel (Nog te beslissen 4).
+  media: {
+    pakketten: [
+      { key: 'klein', naam: 'Klein', prijs: 595, posts: 4, reels: 0, stories: 0 },
+      { key: 'middel', naam: 'Middel', prijs: 1195, posts: 6, reels: 2, stories: 2 },
+      { key: 'groot', naam: 'Groot', prijs: 1495, posts: 10, reels: 4, stories: 4 },
+    ],
+    inbegrepen: ['Strategie', 'Scripts', 'Contentkalender', 'Eén shoot per kwartaal'],
+    community_management: { naam: 'Community management', prijs: 195, uitleg: 'Reacties en berichten worden op werkdagen binnen 24 uur beantwoord.' },
+    losse_items: [
+      { key: 'video_uur', naam: 'Video: per uur shooten, montage inbegrepen', prijs: 300, eenheid: 'uur', bevestigd: true },
+      { key: 'foto_uur', naam: 'Foto: per uur, nabewerking inbegrepen', prijs: 195, eenheid: 'uur', bevestigd: false },
+      { key: 'video_halve_dag', naam: 'Video: halve dag', prijs: 1200, eenheid: 'halve dag', bevestigd: false },
+      { key: 'foto_halve_dag', naam: 'Foto: halve dag', prijs: 780, eenheid: 'halve dag', bevestigd: false },
+    ],
+    goedkeuring_dagen: 7, rondes: 2, looptijd_eerste_maanden: 6, verlenging_maanden: 12, verlenging_template_id: null,
   },
 }
 
@@ -176,6 +215,31 @@ export function leesWerking(ruw: unknown): WerkingInstellingen {
       nazorg_call_min: Math.round(getalOf(lv.nazorg_call_min, L.nazorg_call_min, 5, 240)),
       verantwoordelijke: naamOf(lv.verantwoordelijke, L.verantwoordelijke),
     },
+    media: (() => {
+      const M = S.media, md = obj(r.media)
+      const rp = Array.isArray(md.pakketten) ? (md.pakketten as unknown[]) : []
+      const ri = Array.isArray(md.losse_items) ? (md.losse_items as unknown[]) : []
+      const cm = obj(md.community_management)
+      const tekst = (v: unknown, std: string, max: number) => (typeof v === 'string' && v.trim() ? v.replace(/\s+/g, ' ').trim().slice(0, max) : std)
+      const inbegrepen = Array.isArray(md.inbegrepen) ? (md.inbegrepen as unknown[]).map((x) => String(x ?? '').trim().slice(0, 120)).filter(Boolean).slice(0, 12) : M.inbegrepen
+      return {
+        pakketten: M.pakketten.map((std) => {
+          const x = obj(rp.find((p) => obj(p).key === std.key))
+          return { key: std.key, naam: tekst(x.naam, std.naam, 30), prijs: getalOf(x.prijs, std.prijs, 0, 100_000), posts: Math.round(getalOf(x.posts, std.posts, 0, 200)), reels: Math.round(getalOf(x.reels, std.reels, 0, 200)), stories: Math.round(getalOf(x.stories, std.stories, 0, 200)) }
+        }),
+        inbegrepen: inbegrepen.length ? inbegrepen : M.inbegrepen,
+        community_management: { naam: tekst(cm.naam, M.community_management.naam, 60), prijs: getalOf(cm.prijs, M.community_management.prijs, 0, 100_000), uitleg: tekst(cm.uitleg, M.community_management.uitleg, 300) },
+        losse_items: M.losse_items.map((std) => {
+          const x = obj(ri.find((p) => obj(p).key === std.key))
+          return { key: std.key, naam: tekst(x.naam, std.naam, 80), prijs: getalOf(x.prijs, std.prijs, 0, 100_000), eenheid: tekst(x.eenheid, std.eenheid, 20), bevestigd: typeof x.bevestigd === 'boolean' ? x.bevestigd : std.bevestigd }
+        }),
+        goedkeuring_dagen: Math.round(getalOf(md.goedkeuring_dagen, M.goedkeuring_dagen, 1, 60)),
+        rondes: Math.round(getalOf(md.rondes, M.rondes, 0, 10)),
+        looptijd_eerste_maanden: Math.round(getalOf(md.looptijd_eerste_maanden, M.looptijd_eerste_maanden, 1, 60)),
+        verlenging_maanden: Math.round(getalOf(md.verlenging_maanden, M.verlenging_maanden, 1, 60)),
+        verlenging_template_id: typeof md.verlenging_template_id === 'string' && UUID.test(md.verlenging_template_id) ? md.verlenging_template_id : null,
+      }
+    })(),
     care: (() => {
       const van = uurOf(cr.werkdag_van, C.werkdag_van), tot = uurOf(cr.werkdag_tot, C.werkdag_tot)
       const goed = tot > van

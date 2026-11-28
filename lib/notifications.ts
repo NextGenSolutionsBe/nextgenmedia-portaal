@@ -408,7 +408,7 @@ export type OpvolgItem = {
   /** Om een taak bij deze regel te maken. */
   nieuweTaak?: TaakVoorstel | null
 }
-export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'tegentekenen' | 'facturen' | 'mails' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen' | 'offertes' | 'verlengen' | 'levering'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
+export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'tegentekenen' | 'facturen' | 'mails' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen' | 'offertes' | 'verlengen' | 'levering' | 'shoots'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
 
 const OPVOLG_MAX = 5
 const dagKort = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
@@ -449,6 +449,7 @@ export async function buildOpvolging(modules: string[] | null, weergave: Bedrijf
     mag('opleveringen') ? opvolgOpleveringen() : null,
     mag('offertes') ? opvolgOffertes() : null,
     mag('ngs_levering') || mag('nextgensolutions') ? opvolgLevering() : null,
+    mag('content') || mag('shoots') ? opvolgKwartaalShoots() : null,
   ])
   const lijst = groepen.filter((g): g is OpvolgGroep => !!g)
   await koppelTaken(lijst).catch(() => null)
@@ -702,6 +703,9 @@ export async function buildOpvolging(modules: string[] | null, weergave: Bedrijf
    */
   async function opvolgVerlengen(): Promise<OpvolgGroep | null> {
     try {
+      // Verlengingsgesprek (nieuwe werking fase 7): de regel opent Contract uit template met de verlengingstemplate en de klant.
+      const media = await import('@/lib/instellingen/laden').then((m) => m.leesInstellingen()).then((i) => i.werking.media).catch(() => null)
+      const tpl = media?.verlenging_template_id ?? null
       const tot = plusDagen(vandaag, 60)
       const { data } = await opBedrijf(admin.from('contracts').select('id, title, client_id, status, end_date, looptijd_status, stop_datum')
         .eq('status', 'signed').gte('end_date', vandaag).lte('end_date', tot)).order('end_date').limit(200)
@@ -716,7 +720,7 @@ export async function buildOpvolging(modules: string[] | null, weergave: Bedrijf
           const over = verlengingNodig(c, vandaag) ?? 0
           return {
             id: c.id, titel: klant ?? c.title ?? 'Contract', sub: `${c.title ?? 'Contract'} · loopt af op ${dagKort(c.end_date)} (nog ${over} ${over === 1 ? 'dag' : 'dagen'})`.slice(0, 80),
-            href: `/admin/contracts/${c.id}`, dringend: over <= 30,
+            href: tpl && c.client_id ? `/admin/contracts/templates?template=${tpl}&client=${c.client_id}` : `/admin/contracts/${c.id}`, dringend: over <= 30,
             label: teDoen(verlengingDeadline(c.end_date, vandaag), vandaag),
             nieuweTaak: teamTaak('verlengen', c.id, ['Verlengingsgesprek', 'Verlenging voorstellen', 'Klant bellen over de verlenging'], klant, c.client_id),
           }
@@ -749,6 +753,29 @@ export async function buildOpvolging(modules: string[] | null, weergave: Bedrijf
           href: `/admin/nextgensolutions/levering?project=${w.projectId}`, dringend: true,
           label: teDoen(w.deadline, vandaag),
           nieuweTaak: teamTaak('levering', w.id, w.soort === 'bouw' ? ['Klant laten weten waar de bouw staat', 'Bouw afwerken'] : ['Nazorgcall inplannen'], w.klant, w.clientId),
+        })),
+      }
+    } catch { return null }
+  }
+
+  /**
+   * Kwartaalcyclus van Media (nieuwe werking fase 7): de shoot van het volgende
+   * kwartaal ligt op de eerste dag van de shootmaand nog niet vast (geen shoot in
+   * de Shoot planner en niet met de hand afgevinkt).
+   */
+  async function opvolgKwartaalShoots(): Promise<OpvolgGroep | null> {
+    if (!past(MEDIA)) return null
+    try {
+      const { kwartaalShootsTeLaat } = await import('@/lib/contentplanning/kwartaal-server')
+      const lijst = await kwartaalShootsTeLaat(admin)
+      if (!lijst.length) return null
+      return {
+        key: 'shoots', titel: 'Shoot vastleggen', totaal: lijst.length, alles: '/admin/contentplanning', leeg: 'Alle shoots van het volgende kwartaal liggen vast.',
+        items: lijst.slice(0, OPVOLG_MAX).map((r) => ({
+          id: `${r.client_id}:${r.shootMaand}`, titel: r.klant, sub: `Shoot voor kwartaal ${r.kwartaal} (${dagKort(`${r.shootMaand}-01`).replace(/^\d+\s/, '')})`,
+          href: `/admin/shoots/nieuw?klant=${r.client_id}`, dringend: true,
+          label: teDoen(r.tegen, vandaag),
+          nieuweTaak: teamTaak('shoots', r.client_id, ['Shoot vastleggen met de klant', 'Klant bellen voor een shootdatum'], r.klant, r.client_id),
         })),
       }
     } catch { return null }
