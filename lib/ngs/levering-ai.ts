@@ -2,7 +2,7 @@ import 'server-only'
 import { BRIEFING_VELDEN, leesLeveringVoorstel, type Briefing, type BriefingVoorstel, type StoryVoorstel } from './levering'
 
 /**
- * Uit de notities van de tijdscan een voorstel maken: de briefing en de user
+ * Uit de notities van de audit een voorstel maken: de briefing en de user
  * stories. Enkel een voorstel: het scherm toont het, een mens past aan en
  * bevestigt. Naar de AI gaan enkel de notities, de briefing en de klantnaam.
  */
@@ -12,7 +12,7 @@ function vraag(o: { notities: string; briefing: Briefing; klant: string | null }
   const velden = BRIEFING_VELDEN.map((v) => `  "${v.key}": "${v.label}: ${v.hint}"`).join(',\n')
   const huidige = BRIEFING_VELDEN.filter((v) => o.briefing[v.key]).map((v) => `${v.label}: ${o.briefing[v.key]}`).join('\n')
   return `Je helpt NextGenSolutions, een Belgisch bureau dat AI-automatisaties en software op maat bouwt voor kmo's.
-Hieronder staan de notities van een tijdscan${o.klant ? ` bij de klant ${o.klant}` : ''}: een gesprek waarin we de processen van de klant doorliepen.
+Hieronder staan de notities van een audit${o.klant ? ` bij de klant ${o.klant}` : ''}: een gesprek waarin we de processen van de klant doorliepen.
 Maak er een voorstel van: een briefing en de user stories voor het project.
 
 Regels:
@@ -30,14 +30,14 @@ ${velden}
   "stories": [{"titel": "", "als": "", "wil": "", "zodat": "", "acceptatiecriteria": [""], "schatting_uren": 4}]
 }
 ${huidige ? `\nDe briefing zoals ze nu is (vul aan, spreek niet tegen):\n${huidige}\n` : ''}
-Notities van de tijdscan:
+Notities van de audit:
 ${o.notities.slice(0, 30000)}`
 }
 
 export async function voorstelUitTijdscan(o: { notities: string; briefing: Briefing; klant: string | null }): Promise<{ briefing: BriefingVoorstel; stories: StoryVoorstel[] }> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('AI niet geconfigureerd: ANTHROPIC_API_KEY ontbreekt in deze omgeving.')
-  if (o.notities.replace(/[-\s:]/g, '').length < 40) throw new Error('Schrijf eerst de notities van de tijdscan.')
+  if (o.notities.replace(/[-\s:]/g, '').length < 40) throw new Error('Schrijf eerst de notities van de audit.')
   let res: Response
   try {
     res = await fetch('https://api.anthropic.com/v1/messages', {

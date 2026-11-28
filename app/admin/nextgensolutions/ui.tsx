@@ -20,6 +20,8 @@ export const FASE_STIJL: Record<Fase, { stip: string; zacht: string; tekst: stri
   afspraak: { stip: 'bg-sky-500', zacht: 'bg-sky-50 border-sky-100', tekst: 'text-sky-800' },
   voorstel: { stip: 'bg-violet-500', zacht: 'bg-violet-50 border-violet-100', tekst: 'text-violet-800' },
   opvolgen: { stip: 'bg-amber-500', zacht: 'bg-amber-50 border-amber-100', tekst: 'text-amber-800' },
+  audit: { stip: 'bg-blue-700', zacht: 'bg-blue-50 border-blue-100', tekst: 'text-blue-900' },
+  opvolgen_rapport: { stip: 'bg-orange-500', zacht: 'bg-orange-50 border-orange-100', tekst: 'text-orange-800' },
   won: { stip: 'bg-green-600', zacht: 'bg-green-50 border-green-100', tekst: 'text-green-800' },
   lost: { stip: 'bg-gray-400', zacht: 'bg-gray-50 border-gray-100', tekst: 'text-gray-600' },
 }
@@ -32,8 +34,8 @@ export async function post(body: Record<string, unknown>) {
 }
 
 /** Bovenaan elke pagina: wie we zijn (logo en NextGenSolutions) en de twee tabbladen. */
-export function Kop({ actief, titel, sub, rechts }: { actief: 'pipeline' | 'levering' | 'cijfers'; titel: string; sub?: React.ReactNode; rechts?: React.ReactNode }) {
-  const tab = (k: 'pipeline' | 'levering' | 'cijfers', href: string, label: string) => (
+export function Kop({ actief, titel, sub, rechts, tabs }: { actief: 'pipeline' | 'levering' | 'cijfers'; titel: string; sub?: React.ReactNode; rechts?: React.ReactNode; tabs?: ('pipeline' | 'levering' | 'cijfers')[] }) {
+  const tab = (k: 'pipeline' | 'levering' | 'cijfers', href: string, label: string) => (tabs && !tabs.includes(k)) ? null : (
     <Link href={href} aria-current={actief === k ? 'page' : undefined}
       className={`px-3.5 py-1.5 rounded-full text-sm transition ${actief === k ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-600 hover:text-gray-900'}`}>{label}</Link>
   )

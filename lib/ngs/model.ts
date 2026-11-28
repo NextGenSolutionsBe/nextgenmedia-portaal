@@ -9,13 +9,18 @@ import { BRONNEN_LIJST, isBronKey, bronNaam, VERLIES_REDENEN } from '@/lib/sales
 
 export const FASES = [
   { key: 'afspraak', label: 'Afspraak', kort: 'Afspraak', kans: 0.2 },
-  { key: 'voorstel', label: 'Voorstel maken', kort: 'Voorstel', kans: 0.4 },
-  { key: 'opvolgen', label: 'Opvolgen', kort: 'Opvolgen', kans: 0.6 },
+  { key: 'voorstel', label: 'Voorstel', kort: 'Voorstel', kans: 0.4 },
+  { key: 'opvolgen', label: 'Opvolgen voorstel', kort: 'Opv. voorstel', kans: 0.6 },
+  { key: 'audit', label: 'Audit', kort: 'Audit', kans: 0.75 },
+  { key: 'opvolgen_rapport', label: 'Opvolgen rapport', kort: 'Opv. rapport', kans: 0.85 },
   { key: 'won', label: 'Closed Won', kort: 'Won', kans: 1 },
   { key: 'lost', label: 'Closed Lost', kort: 'Lost', kans: 0 },
 ] as const
 export type Fase = (typeof FASES)[number]['key']
-export const OPEN_FASES: Fase[] = ['afspraak', 'voorstel', 'opvolgen']
+export const OPEN_FASES: Fase[] = ['afspraak', 'voorstel', 'opvolgen', 'audit', 'opvolgen_rapport']
+/** In deze fases bellen we op: één keer per week (Instellingen → Werking), tenzij anders afgesproken. */
+export const OPVOLG_FASES: Fase[] = ['opvolgen', 'opvolgen_rapport']
+export const isOpvolgFase = (f: string) => (OPVOLG_FASES as string[]).includes(f)
 export const isFase = (v: unknown): v is Fase => FASES.some((f) => f.key === v)
 export const faseLabel = (f: string) => FASES.find((x) => x.key === f)?.label ?? f
 export const isOpen = (f: string) => (OPEN_FASES as string[]).includes(f)
@@ -62,9 +67,20 @@ export type Deal = {
   created_by: string | null
   /** Fase 5: de klant in de app (optioneel; de pipeline werkt ook zonder). */
   client_id?: string | null
+  /** Nieuwe werking (28 nov 2026): de vervolgafspraak na het voorstel en de gegevens van de audit. */
+  vervolg_op?: string | null
+  vervolg_meeting_id?: string | null
+  processen?: number | null
+  audit_prijs?: number | null
+  audit_contract_id?: string | null
+  audit_buiten_app?: boolean
+  audit_buiten_notitie?: string | null
+  auditdag_op?: string | null
+  presentatie_op?: string | null
+  audit_checklist?: Record<string, string | null>
 }
 
-export type DealInvoer = Omit<Deal, 'id' | 'fase' | 'fase_sinds' | 'gewonnen_op' | 'verloren_op' | 'verloren_reden' | 'created_at' | 'created_by' | 'client_id'>
+export type DealInvoer = Omit<Deal, 'id' | 'fase' | 'fase_sinds' | 'gewonnen_op' | 'verloren_op' | 'verloren_reden' | 'created_at' | 'created_by' | 'client_id' | 'vervolg_op' | 'vervolg_meeting_id' | 'processen' | 'audit_prijs' | 'audit_contract_id' | 'audit_buiten_app' | 'audit_buiten_notitie' | 'auditdag_op' | 'presentatie_op' | 'audit_checklist'>
 
 const DAG = /^\d{4}-\d{2}-\d{2}$/
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -310,3 +326,84 @@ export function sorteerKolom(deals: Deal[], fase: Fase, opvolging: Map<string, s
 }
 
 export const zoekDeal = (d: Deal, q: string) => !q.trim() || `${d.bedrijf} ${d.contactpersoon ?? ''} ${d.titel ?? ''} ${d.email ?? ''} ${d.diensten.map(dienstLabel).join(' ')}`.toLowerCase().includes(q.trim().toLowerCase())
+
+
+// ── Nieuwe werking (28 nov 2026): vervolgafspraak, belpogingen, audit ─────────
+
+const plusDag = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10) }
+
+/**
+ * Na een belpoging: de volgende opvolging, standaard `dagen` later (Instellingen →
+ * Werking). Valt dat in het weekend, dan de maandag erna. Altijd aan te passen.
+ */
+export function volgendeBelDatum(vandaag: string, dagen: number): string {
+  let d = plusDag(vandaag, dagen)
+  const wd = new Date(`${d}T12:00:00Z`).getUTCDay()
+  if (wd === 6) d = plusDag(d, 2)
+  if (wd === 0) d = plusDag(d, 1)
+  return d
+}
+
+/** De vervolgafspraak: een geplande meeting gaat voor op een met de hand ingevulde datum. */
+export function vervolgVan(d: Pick<Deal, 'vervolg_op'>, meeting: { starts_at: string } | null | undefined): string | null {
+  return meeting?.starts_at ?? d.vervolg_op ?? null
+}
+
+/** In Voorstel zonder vervolgafspraak (of een die al voorbij is): een gele waarschuwing. */
+export function vervolgOntbreekt(d: Pick<Deal, 'fase'>, vervolg: string | null, nu: string): boolean {
+  if (d.fase !== 'voorstel') return false
+  return !vervolg || vervolg < nu
+}
+
+/** De checklist in de fase Audit. `wie` komt uit Instellingen → Werking. */
+export const AUDIT_STAPPEN = [
+  { key: 'auditdag', titel: 'Auditdag ter plaatse', wie: 'auditdag' },
+  { key: 'briefing', titel: 'Briefing van 30 minuten aan de bouwer', wie: 'auditdag' },
+  { key: 'rapport', titel: 'Rapport', wie: 'rapport' },
+  { key: 'presentatie', titel: 'Presentatie van het rapport', wie: 'auditdag' },
+] as const
+export type AuditStap = (typeof AUDIT_STAPPEN)[number]['key']
+export const isAuditStap = (v: unknown): v is AuditStap => AUDIT_STAPPEN.some((s) => s.key === v)
+
+/** Richtlijn voor de presentatie: ongeveer x minuten per proces. */
+export const presentatieMinuten = (processen: number | null | undefined, perProces: number) => Math.max(1, processen ?? 1) * perProces
+
+export type AuditInvoer = {
+  processen: number; audit_prijs: number; audit_contract_id: string | null; audit_buiten_app: boolean; audit_buiten_notitie: string | null
+  auditdag_op: string; presentatie_op: string
+}
+
+/**
+ * Naar Audit: aantal processen (1 tot max), de prijs (basis + per proces, uit de
+ * instellingen), een getekend voorstel (contract uit de app of "getekend buiten de
+ * app"), de auditdag en de presentatie. De presentatie ligt op of na de auditdag;
+ * later dan `maxDagen` erna mag, met een waarschuwing.
+ */
+export function controleerAudit(b: Record<string, unknown>, v: { max_processen: number; presentatie_max_dagen: number; prijs: (n: number) => number }):
+  { ok: true; audit: AuditInvoer; waarschuwing: string | null } | { ok: false; fout: string } {
+  const n = Number(b.processen)
+  if (!Number.isInteger(n) || n < 1 || n > v.max_processen) return { ok: false, fout: `Hoeveel processen? Tussen 1 en ${v.max_processen}.` }
+  const contract = typeof b.audit_contract_id === 'string' && /^[0-9a-f-]{36}$/i.test(b.audit_contract_id) ? b.audit_contract_id : null
+  const buiten = b.audit_buiten_app === true
+  if (!contract && !buiten) return { ok: false, fout: 'Kies het getekende voorstel, of duid aan dat het buiten de app getekend werd.' }
+  const auditdag = typeof b.auditdag_op === 'string' && geldigeDag(b.auditdag_op) ? b.auditdag_op : null
+  if (!auditdag) return { ok: false, fout: 'Wanneer is de auditdag?' }
+  const presentatie = typeof b.presentatie_op === 'string' && geldigeDag(b.presentatie_op) ? b.presentatie_op : null
+  if (!presentatie) return { ok: false, fout: 'Wanneer is de presentatie van het rapport?' }
+  if (presentatie < auditdag) return { ok: false, fout: 'De presentatie ligt na de auditdag.' }
+  const verschil = Math.round((Date.parse(`${presentatie}T12:00:00Z`) - Date.parse(`${auditdag}T12:00:00Z`)) / 86_400_000)
+  const waarschuwing = verschil > v.presentatie_max_dagen ? `De presentatie ligt ${verschil} dagen na de auditdag (richtlijn: hoogstens ${v.presentatie_max_dagen}).` : null
+  return {
+    ok: true, waarschuwing,
+    audit: {
+      processen: n, audit_prijs: v.prijs(n), audit_contract_id: contract, audit_buiten_app: buiten && !contract,
+      audit_buiten_notitie: buiten && !contract ? tekst(b.audit_buiten_notitie, 300) : null, auditdag_op: auditdag, presentatie_op: presentatie,
+    },
+  }
+}
+
+/** De checklist netjes: per stap wanneer ze afgevinkt werd (of niet). */
+export function leesChecklist(v: unknown): Record<AuditStap, string | null> {
+  const r = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
+  return Object.fromEntries(AUDIT_STAPPEN.map((s) => [s.key, typeof r[s.key] === 'string' ? (r[s.key] as string) : null])) as Record<AuditStap, string | null>
+}

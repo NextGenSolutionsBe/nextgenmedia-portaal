@@ -271,7 +271,8 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
               <div>
                 <label className={LBL} htmlFor="opdracht-merk">Bedrijf</label>
                 <select id="opdracht-merk" className="input-base" value={c.merk || bedrijfVan(null, c.diensten)} onChange={(e) => zet('merk', e.target.value as Bedrijf)}>
-                  {BEDRIJVEN.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+                  {/* Solutions staat enkel in de Pipeline (28 nov 2026): enkel tonen als de kaart het al was. */}
+                  {BEDRIJVEN.filter((b) => b.key !== 'nextgensolutions' || (c.merk || bedrijfVan(null, c.diensten)) === 'nextgensolutions').map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
                 </select>
               </div>
               <div>
@@ -283,7 +284,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
             <div>
               <p className={LBL}>Diensten <span className="font-normal text-gray-400">· de eerste bepaalt de kleur van de kaart</span></p>
               <div className="flex flex-wrap gap-1.5">
-                {DIENSTEN.map((d) => {
+                {DIENSTEN.filter((d) => d.key !== 'ngs' || c.diensten.includes('ngs')).map((d) => {
                   const aan = c.diensten.includes(d.key as string)
                   return (
                     <button key={d.key} type="button" onClick={() => wisselDienst(d.key as string)} aria-pressed={aan}

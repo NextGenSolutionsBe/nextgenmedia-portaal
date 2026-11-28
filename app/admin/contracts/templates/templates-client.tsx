@@ -286,6 +286,8 @@ function FromTemplateDialog({ template, clients, onClose }: { template: Template
   const vooraf = (() => { try { return new URLSearchParams(window.location.search) } catch { return new URLSearchParams() } })()
   const [clientId, setClientId] = useState(/^[0-9a-f-]{36}$/i.test(vooraf.get('client') ?? '') ? (vooraf.get('client') as string) : '')
   const opdrachtId = /^[0-9a-f-]{36}$/i.test(vooraf.get('opdracht') ?? '') ? vooraf.get('opdracht') : null
+  // Vanaf een deal van NextGenSolutions (voorstel): ?client=<id>&deal=<id>. Het contract hangt dan aan de deal, niet aan Projecten.
+  const dealId = /^[0-9a-f-]{36}$/i.test(vooraf.get('deal') ?? '') ? vooraf.get('deal') : null
   const [service, setService] = useState('')
   const [signerName, setSignerName] = useState('')
   const [signerEmail, setSignerEmail] = useState('')
@@ -298,7 +300,7 @@ function FromTemplateDialog({ template, clients, onClose }: { template: Template
   const [zelfGekozen, setZelfGekozen] = useState(false)
   // Voor welk bedrijf (verbeterplan fase 1): verplicht. Voorstel uit de projectkaart of de dienst.
   const dienstBedrijf = (slug: string) => STANDAARD_DIENSTEN.find((x) => x.slug === SERVICE_SLUG_NAAR_DIENST[slug])?.bedrijf ?? null
-  const [bedrijf, setBedrijf] = useState<string | null>(() => (template.bedrijf && template.bedrijf !== "algemeen" ? template.bedrijf : null) ?? dienstBedrijf(service))
+  const [bedrijf, setBedrijf] = useState<string | null>(() => (dealId ? 'nextgensolutions' : null) ?? (template.bedrijf && template.bedrijf !== "algemeen" ? template.bedrijf : null) ?? dienstBedrijf(service))
   const [bedrijfZelf, setBedrijfZelf] = useState(false)
   useEffect(() => {
     if (zelfGekozen) return
@@ -324,6 +326,7 @@ function FromTemplateDialog({ template, clients, onClose }: { template: Template
           title: title || null,
           expires_at: expiresAt || null,
           ...(opdrachtId ? { opdracht_id: opdrachtId } : {}),
+          ...(dealId ? { ngs_deal_id: dealId } : {}),
           verantwoordelijke,
           bedrijf,
         }),

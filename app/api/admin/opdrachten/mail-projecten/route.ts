@@ -32,10 +32,11 @@ export async function POST(req: NextRequest) {
     if (b.actie === 'ja') {
       const p = await magIk('opdrachten', 'toevoegen')
       if (!p) return NextResponse.json({ error: 'Je mag geen projecten toevoegen.' }, { status: 403 })
-      const { opdrachtId } = await maakKaartUitMail(admin, id, b, { email: p.email ?? null, naam: p.naam ?? null })
-      await logAudit({ action: 'opdracht.create', entityType: 'opdracht', entityId: opdrachtId, summary: `Projectkaart uit de mail: ${String(b.titel ?? '').slice(0, 120)}`, actorUserId: p.userId, actorEmail: p.email, ...requestMeta(req) })
+      const { opdrachtId, dealId } = await maakKaartUitMail(admin, id, b, { email: p.email ?? null, naam: p.naam ?? null })
+      if (dealId) await logAudit({ action: 'ngs.nieuw', entityType: 'ngs_deal', entityId: dealId, summary: `Deal uit de mail: ${String(b.titel ?? '').slice(0, 120)}`, actorUserId: p.userId, actorEmail: p.email, ...requestMeta(req) })
+      else await logAudit({ action: 'opdracht.create', entityType: 'opdracht', entityId: opdrachtId, summary: `Projectkaart uit de mail: ${String(b.titel ?? '').slice(0, 120)}`, actorUserId: p.userId, actorEmail: p.email, ...requestMeta(req) })
       try { revalidatePath('/admin') } catch { }
-      return NextResponse.json({ ok: true, opdrachtId })
+      return NextResponse.json({ ok: true, opdrachtId, dealId: dealId ?? null })
     }
     if (b.actie === 'nee' || b.actie === 'terug') {
       const p = await magIk('opdrachten', 'aanpassen')

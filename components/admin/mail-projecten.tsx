@@ -104,10 +104,11 @@ export function MailProjecten() {
                 )}
               </div>
               {open === p.id && (
-                <KaartMaken p={p} naam={naam} onSluit={() => setOpen(null)} onKlaar={(id) => {
+                <KaartMaken p={p} naam={naam} onSluit={() => setOpen(null)} onKlaar={(id, dealId) => {
                   setOpen(null)
-                  setLijst((l) => (l ?? []).map((x) => (x.id === p.id ? { ...x, status: 'ja', kaart: { id, titel: x.titel ?? '' } } : x)))
-                  toast.success('De kaart staat in Opvolging.', { action: { label: 'Openen', onClick: () => router.push(`/admin/opdrachten?opdracht=${id}`) } })
+                  setLijst((l) => (l ?? []).map((x) => (x.id === p.id ? { ...x, status: 'ja', kaart: id ? { id, titel: x.titel ?? '' } : x.kaart } : x)))
+                  if (dealId) toast.success('De deal staat in de Pipeline van NextGenSolutions (Afspraak).', { action: { label: 'Openen', onClick: () => router.push(`/admin/nextgensolutions?deal=${dealId}`) } })
+                  else toast.success('De kaart staat in Opvolging.', { action: { label: 'Openen', onClick: () => router.push(`/admin/opdrachten?opdracht=${id}`) } })
                 }} />
               )}
             </li>
@@ -136,7 +137,7 @@ export function MailProjecten() {
   )
 }
 
-function KaartMaken({ p, naam, onSluit, onKlaar }: { p: MailProject; naam: string; onSluit: () => void; onKlaar: (opdrachtId: string) => void }) {
+function KaartMaken({ p, naam, onSluit, onKlaar }: { p: MailProject; naam: string; onSluit: () => void; onKlaar: (opdrachtId: string, dealId?: string | null) => void }) {
   const [klant, setKlant] = useState(p.client_id ? '' : naam)
   const [titel, setTitel] = useState(p.titel ?? '')
   const [diensten, setDiensten] = useState<string[]>(p.diensten)
@@ -149,7 +150,7 @@ function KaartMaken({ p, naam, onSluit, onKlaar }: { p: MailProject; naam: strin
     setBezig(true)
     try {
       const j = await post({ actie: 'ja', id: p.id, titel, ...(p.client_id ? {} : { klant }), diensten, merk, verantwoordelijke: wie })
-      onKlaar(j.opdrachtId)
+      onKlaar(j.opdrachtId, j.dealId ?? null)
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt'); setBezig(false) }
   }
   return (

@@ -13,7 +13,7 @@ import { CareLijst } from './care'
  * Levering van NextGenSolutions: elk gewonnen project per fase (Briefing tot
  * Care) en het Care-register. Een project start vanuit de deal (Closed Won).
  */
-export function LeveringClient({ begin, openProject, tab: beginTab }: { begin: LeveringData; openProject: string | null; tab: 'projecten' | 'care' }) {
+export function LeveringClient({ begin, openProject, tab: beginTab, verkoop = true }: { begin: LeveringData; openProject: string | null; tab: 'projecten' | 'care'; verkoop?: boolean }) {
   const router = useRouter()
   const [data, setData] = useState(begin)
   const [tab, setTab] = useState(beginTab)
@@ -33,7 +33,7 @@ export function LeveringClient({ begin, openProject, tab: beginTab }: { begin: L
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <Kop actief="levering" titel="Levering" sub="Van briefing tot Care, per gewonnen project." />
+      <Kop actief="levering" titel="Levering" sub="Van briefing tot Care, per gewonnen project." tabs={verkoop ? undefined : ['levering']} />
       {!data.klaar && <div className="card-base text-sm text-gray-600">De levering is er pas na de update van de databank.</div>}
       <div className="inline-flex rounded-full p-1 bg-gray-100" role="tablist">
         {([['projecten', `Projecten (${data.projecten.length})`], ['care', `Care (${data.care.length})${teLaatCare ? ` · ${teLaatCare} te laat` : ''}`]] as const).map(([k, l]) => (
@@ -56,7 +56,7 @@ export function LeveringClient({ begin, openProject, tab: beginTab }: { begin: L
                       <div className="text-sm font-semibold truncate">{p.titel}</div>
                       <div className="text-[11px] text-gray-500 truncate">{p.klant ?? 'geen klant gekoppeld'}{p.verantwoordelijke ? ` · ${p.verantwoordelijke}` : ''}</div>
                       {p.stories.totaal > 0 && <div className="text-[11px] text-gray-600">{p.stories.klaar}/{p.stories.totaal - p.stories.voorstel} stories klaar · {p.stories.besteed}/{p.stories.geschat} u{p.stories.voorstel ? ` · ${p.stories.voorstel} voorstel` : ''}</div>}
-                      {p.planTeLaat && <div className="text-[11px] text-amber-800 flex items-center gap-1"><AlertTriangle className="h-3 w-3" />{p.planTeLaat} dagen na de tijdscan geen plan</div>}
+                      {p.planTeLaat && <div className="text-[11px] text-amber-800 flex items-center gap-1"><AlertTriangle className="h-3 w-3" />{p.planTeLaat} dagen na de audit geen plan</div>}
                       {f.key === 'briefing' && !p.briefing_bevestigd_op && <div className="text-[11px] text-gray-500">Briefing nog te bevestigen</div>}
                     </button>
                   ))}

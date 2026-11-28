@@ -6,12 +6,17 @@ import { Check, Loader2, Trash2 } from 'lucide-react'
 import { leesGetal } from '@/lib/getal'
 import { ClickupTaken, NieuweTaak } from '@/components/admin/clickup-taken'
 import { DicteerKnop } from '@/components/admin/dicteer-knop'
+import { UITKOMSTEN } from '@/lib/abm'
 import {
   BRONNEN, FASES, STANDAARD_LOOPTIJD, VERLOREN_REDENEN, dealWaarde, faseLabel, bronLabel, type Deal, type Fase,
 } from '@/lib/ngs/model'
 import { Chip, FASE_STIJL, Venster, dagKort, eur, eurCent, inp, lbl, post, tijdstip } from './ui'
 import { PersoonKnop } from '@/components/admin/persoon-foto'
 import { DealLevering } from './deal-levering'
+import { VervolgBlok, BelpogingBlok, AuditBlok, NaarVoorstel, NaarAudit } from './deal-verkoop'
+import { isOpvolgFase, volgendeBelDatum } from '@/lib/ngs/model'
+import type { Vervolg } from '@/lib/ngs/server'
+import type { WerkingInstellingen } from '@/lib/werking/instellingen'
 
 type Velden = {
   bedrijf: string; contactpersoon: string; email: string; telefoon: string; titel: string; diensten: string[]
@@ -30,6 +35,9 @@ const veldenVan = (d: Deal | null, ik: string | null): Velden => ({
   looptijd_maanden: d?.looptijd_maanden ? String(d.looptijd_maanden) : '', start_datum: d?.start_datum ?? '',
   bron: d?.bron ?? '', verantwoordelijke: d?.verantwoordelijke ?? ik ?? '',
 })
+
+/** De volgende opvolging: vandaag + x dagen (Instellingen → Werking), in het weekend de maandag erna. */
+const opvolgDatum = (dagen: number) => volgendeBelDatum(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()), dagen)
 
 /** Wat de server verwacht (afspraak als ISO). */
 const lichaam = (v: Velden) => ({ ...v, afspraak_op: v.afspraak_op ? new Date(v.afspraak_op).toISOString() : null })
@@ -89,15 +97,19 @@ function Formulier({ v, zet, namen }: { v: Velden; zet: (p: Partial<Velden>) => 
   )
 }
 
-type Notitie = { id: string; tekst: string; soort: 'notitie' | 'systeem'; door: string | null; created_at: string }
+type Notitie = { id: string; tekst: string; soort: 'notitie' | 'systeem'; door: string | null; created_at: string; uitkomst?: string | null }
 
 /**
  * Een deal openen of toevoegen. Nieuw: de gegevens en in welke fase hij start.
  * Bestaand: de fase (klik = verplaatsen), de gegevens, de opvolgtaken (ClickUp)
  * en de notities met de tijdlijn.
  */
-export function DealVenster({ deal, ik, namen, onSluit, onKlaar, onVerplaats, onVernieuw }: {
+export function DealVenster({ deal, ik, namen, onSluit, onKlaar, onVerplaats, onVernieuw, vervolg, verkoop }: {
   deal: Deal | null; ik: string | null; namen: string[]
+  /** De eerstvolgende meeting van de deal (Meeting Inplanner). */
+  vervolg?: Vervolg | null
+  /** Instellingen → Werking: auditprijs, opvolgritme, wie de audit doet. */
+  verkoop: WerkingInstellingen['verkoop']
   onSluit: () => void
   /** Stil herladen (bv. na een nieuwe opvolgtaak), het venster blijft open. */
   onVernieuw: () => void
@@ -150,7 +162,7 @@ export function DealVenster({ deal, ik, namen, onSluit, onKlaar, onVerplaats, on
         <div>
           <span className={lbl}>Status</span>
           <div className="grid grid-cols-5 gap-1 p-1 rounded-xl bg-gray-100" role="group" aria-label="Status">
-            {FASES.map((f) => (
+            {FASES.filter((f) => f.key !== 'audit' && f.key !== 'opvolgen_rapport').map((f) => (
               <button key={f.key} type="button" onClick={() => setFase(f.key)} aria-pressed={fase === f.key}
                 className={`h-9 rounded-lg text-[11px] sm:text-xs leading-tight px-1 ${fase === f.key ? 'bg-white shadow-sm font-semibold text-gray-900' : 'text-gray-600'}`}>
                 <span className="hidden sm:inline">{f.label}</span><span className="sm:hidden">{f.kort}</span>
@@ -184,7 +196,7 @@ export function DealVenster({ deal, ik, namen, onSluit, onKlaar, onVerplaats, on
     <Venster breed onSluit={onSluit} titel={deal.bedrijf}
       sub={<span className="inline-flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${stijl.stip}`} />{faseLabel(deal.fase)} · {eur(dealWaarde(deal))}</span>}>
       {/* Fase: klik = verplaatsen */}
-      <div className="grid grid-cols-5 gap-1 p-1 rounded-xl bg-gray-100" role="group" aria-label="Fase">
+      <div className="grid grid-cols-4 sm:grid-cols-7 gap-1 p-1 rounded-xl bg-gray-100" role="group" aria-label="Fase">
         {FASES.map((f) => (
           <button key={f.key} type="button" onClick={() => f.key !== deal.fase && onVerplaats(deal, f.key)} aria-pressed={deal.fase === f.key}
             className={`h-9 rounded-lg text-[11px] sm:text-xs leading-tight px-1 ${deal.fase === f.key ? 'bg-white shadow-sm font-semibold text-gray-900' : 'text-gray-600 hover:text-gray-900'}`}>
@@ -194,6 +206,10 @@ export function DealVenster({ deal, ik, namen, onSluit, onKlaar, onVerplaats, on
       </div>
       {deal.fase === 'won' && deal.gewonnen_op && <p className="text-xs text-green-800 -mt-2">Gewonnen op {dagKort(deal.gewonnen_op)}{deal.waarde_maandelijks ? `, maandbedrag vanaf ${dagKort(deal.start_datum ?? deal.gewonnen_op)}` : ''}.</p>}
       {deal.fase === 'lost' && <p className="text-xs text-gray-600 -mt-2">Verloren{deal.verloren_op ? ` op ${dagKort(deal.verloren_op)}` : ''}: {deal.verloren_reden}</p>}
+
+      {(deal.fase === 'voorstel' || deal.fase === 'opvolgen') && <VervolgBlok deal={deal} vervolg={vervolg ?? null} onVernieuw={onVernieuw} />}
+      {isOpvolgFase(deal.fase) && <BelpogingBlok deal={deal} onVernieuw={() => { laadNotities(); onVernieuw() }} />}
+      <AuditBlok deal={deal} verkoop={verkoop} onVernieuw={() => { laadNotities(); onVernieuw() }} />
 
       <ClickupTaken api={`/api/admin/nextgensolutions/deals/${deal.id}/taken`} waarbij="deal" standaardMerk="nextgensolutions" titel="Opvolgtaken (ClickUp)"
         klant={deal.bedrijf} context={[deal.bedrijf, deal.titel].filter(Boolean).join(' · ')} onGewijzigd={() => { laadNotities(); onVernieuw() }} />
@@ -221,6 +237,7 @@ export function DealVenster({ deal, ik, namen, onSluit, onKlaar, onVerplaats, on
               <li key={n.id} className={n.soort === 'systeem' ? 'text-[11px] text-gray-500 px-1' : 'rounded-lg bg-gray-50 border border-gray-100 px-3 py-2'}>
                 {n.soort === 'systeem' ? <>{n.tekst} · {tijdstip(n.created_at)}{n.door ? ` · ${n.door}` : ''}</> : (
                   <>
+                    {n.uitkomst && <p className="text-[11px] font-semibold text-gray-600">{UITKOMSTEN.find((u) => u.key === n.uitkomst)?.label ?? n.uitkomst}</p>}
                     <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{n.tekst}</p>
                     <p className="text-[11px] text-gray-500 mt-0.5">{n.door ?? '—'} · {tijdstip(n.created_at)}</p>
                   </>
@@ -241,7 +258,7 @@ export function DealVenster({ deal, ik, namen, onSluit, onKlaar, onVerplaats, on
  * Closed Won = datum en de waarde nakijken (daar komen de cijfers uit);
  * Closed Lost = waarom; Afspraak = wanneer.
  */
-export function VerplaatsVenster({ deal, naar, onSluit, onKlaar }: { deal: Deal; naar: Fase; onSluit: () => void; onKlaar: (m: string) => void }) {
+export function VerplaatsVenster({ deal, naar, onSluit, onKlaar, verkoop }: { deal: Deal; naar: Fase; onSluit: () => void; onKlaar: (m: string) => void; verkoop: WerkingInstellingen['verkoop'] }) {
   const vandaag = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
   const [datum, setDatum] = useState(vandaag)
   const [reden, setReden] = useState('')
@@ -257,13 +274,30 @@ export function VerplaatsVenster({ deal, naar, onSluit, onKlaar }: { deal: Deal;
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt'); setBezig(false) }
   }
 
-  if (naar === 'opvolgen') {
+  if (naar === 'voorstel') {
     return (
-      <Venster titel={`Opvolgen: ${deal.bedrijf}`} sub="Wanneer volg je op? Dat wordt een taak in ClickUp." onSluit={onSluit}>
+      <Venster titel={`Voorstel: ${deal.bedrijf}`} sub="Wanneer is de vervolgafspraak?" onSluit={onSluit}>
+        <NaarVoorstel deal={deal} onKlaar={onKlaar} />
+      </Venster>
+    )
+  }
+
+  if (naar === 'audit') {
+    return (
+      <Venster titel={`Audit: ${deal.bedrijf}`} sub="Processen, prijs, getekend voorstel, auditdag en presentatie." onSluit={onSluit}>
+        <NaarAudit deal={deal} verkoop={verkoop} onKlaar={onKlaar} />
+      </Venster>
+    )
+  }
+
+  if (naar === 'opvolgen' || naar === 'opvolgen_rapport') {
+    const label = faseLabel(naar)
+    return (
+      <Venster titel={`${label}: ${deal.bedrijf}`} sub={`Wanneer bel je? Standaard één keer per week (elke ${verkoop.opvolg_dagen} dagen). Dat wordt een taak in ClickUp.`} onSluit={onSluit}>
         <NieuweTaak basis={`/api/admin/nextgensolutions/deals/${deal.id}/taken`} waarbij="deal" standaardMerk="nextgensolutions" kader={false}
-          klant={deal.bedrijf} context={[deal.bedrijf, deal.titel].filter(Boolean).join(' · ')} onSluit={onSluit}
-          onKlaar={() => (deal.fase === 'opvolgen' ? onKlaar('Opvolgtaak staat in ClickUp.') : verplaats({}, `${deal.bedrijf} staat in Opvolgen, met de taak in ClickUp.`))} />
-        {deal.fase !== 'opvolgen' && <button type="button" onClick={() => verplaats()} disabled={bezig} className="w-full text-xs text-gray-500 underline">Verplaatsen zonder opvolgtaak</button>}
+          klant={deal.bedrijf} context={[deal.bedrijf, deal.titel].filter(Boolean).join(' · ')} onSluit={onSluit} standaardDeadline={opvolgDatum(verkoop.opvolg_dagen)}
+          onKlaar={() => (deal.fase === naar ? onKlaar('Opvolgtaak staat in ClickUp.') : verplaats({}, `${deal.bedrijf} staat in ${label}, met de taak in ClickUp.`))} />
+        {deal.fase !== naar && <button type="button" onClick={() => verplaats()} disabled={bezig} className="w-full text-xs text-gray-500 underline">Verplaatsen zonder opvolgtaak</button>}
       </Venster>
     )
   }

@@ -1,6 +1,6 @@
 /**
  * Levering van NextGenSolutions (verbeterplan fase 5, 27 nov 2026): na Closed Won
- * een leveringsproject met briefing, tijdscan, user stories, plan met vaste prijs,
+ * een leveringsproject met briefing, audit, user stories, plan met vaste prijs,
  * wekelijkse review en Care. Pure regels (client én server), getest in
  * tests/ngs-levering.test.ts. De pipeline zelf (lib/ngs/model.ts) verandert niet.
  */
@@ -47,7 +47,7 @@ export const briefingOntbreekt = (b: Briefing): string[] => BRIEFING_VELDEN.filt
 
 // ── Tijdscan ─────────────────────────────────────────────────────────────────
 
-/** Notitiesjabloon voor de tijdscan (een meeting met de klant waarin we de processen doorlopen). */
+/** Notitiesjabloon voor de audit (een meeting met de klant waarin we de processen doorlopen). */
 export const TIJDSCAN_SJABLOON = [
   'Processen die we doorliepen:',
   '- ',
@@ -173,7 +173,7 @@ export function urenStand(stories: Pick<UserStory, 'status' | 'schatting_uren' |
 
 const dagenTussen = (van: string, tot: string) => Math.round((Date.parse(`${tot}T12:00:00Z`) - Date.parse(`${van}T12:00:00Z`)) / 86_400_000)
 
-/** Waarschuwing: 5 dagen na de tijdscan nog geen goedgekeurd plan. */
+/** Waarschuwing: 5 dagen na de audit nog geen goedgekeurd plan. */
 export function planTeLaat(p: { tijdscan_op: string | null; plan_goedgekeurd_op: string | null; fase: string }, vandaag: string): number | null {
   if (!p.tijdscan_op || p.plan_goedgekeurd_op) return null
   if (!['briefing', 'user_stories', 'akkoord'].includes(p.fase)) return null

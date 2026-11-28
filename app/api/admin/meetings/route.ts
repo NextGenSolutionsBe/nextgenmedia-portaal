@@ -143,6 +143,14 @@ export async function POST(req: NextRequest) {
       if (!project) return NextResponse.json({ error: 'Project niet gevonden.' }, { status: 404 })
       projectId = project.id
     }
+    // Vervolgafspraak van een deal van NextGenSolutions (nieuwe werking, 28 nov 2026).
+    let ngsDealId: string | null = null
+    if (b.ngs_deal_id) {
+      if (!UUID.test(String(b.ngs_deal_id))) return NextResponse.json({ error: 'Ongeldige deal.' }, { status: 400 })
+      const { data: deal } = await admin.from('ngs_deals').select('id').eq('id', String(b.ngs_deal_id)).is('verwijderd_op', null).maybeSingle()
+      if (!deal) return NextResponse.json({ error: 'Deal niet gevonden.' }, { status: 404 })
+      ngsDealId = deal.id
+    }
     let clickupItemId: string | null = null
     if (String(b.clickup_item ?? '').trim()) {
       clickupItemId = clickupTaakIdUit(b.clickup_item)
@@ -183,6 +191,7 @@ export async function POST(req: NextRequest) {
       klant_ontvangers: w.klant_ontvangers, deelnemers: w.deelnemers, herinnering_aan: w.herinnering_aan,
       vorm: w.vorm, locatie: w.locatie, met_meet: w.metMeet,
       created_by: user.id, created_by_email: persoon.email,
+      ...(ngsDealId ? { ngs_deal_id: ngsDealId } : {}),
     }
     let ins: { data: unknown; error: { message: string } | null } = { data: null, error: null }
     for (let i = 0; i < 6; i++) {
@@ -218,6 +227,14 @@ export async function POST(req: NextRequest) {
       }
     }
     m = await stapClickup(admin, m)
+    if (ngsDealId) {
+      // De deal toont de vervolgafspraak; een regel in de tijdlijn.
+      try {
+        await admin.from('ngs_deals').update({ vervolg_op: m.starts_at, vervolg_meeting_id: m.id, updated_at: new Date().toISOString() }).eq('id', ngsDealId)
+        const wanneer = new Date(m.starts_at).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+        await admin.from('ngs_deal_notities').insert({ deal_id: ngsDealId, tekst: `Vervolgafspraak ingepland: ${wanneer}`, soort: 'systeem', door: persoon.naam ?? persoon.email })
+      } catch { /* de meeting staat er; de deal toont ze ook via de koppeling */ }
+    }
     let herinnering: HerinneringRij | null = null
     let herinneringFout: string | null = null
     try { herinnering = await planHerinnering(admin, m) } catch (e) { herinneringFout = safeMessage(e, 'meetings.herinnering') }

@@ -37,12 +37,20 @@ export type WerkingInstellingen = {
   weekoverleg: { dag: number; van: string; duur_min: number; reeks_id: string | null }
   /** Wie standaard welk soort werk doet in Planning Media (voornaam). */
   planning: Record<WerkSoort, string>
+  /** Verkoop bij Solutions (fase 2): auditprijs, opvolgritme, presentatie. */
+  verkoop: {
+    audit_basis: number; audit_per_proces: number; max_processen: number
+    opvolg_dagen: number; presentatie_max_dagen: number; presentatie_min_per_proces: number
+    /** Wie de auditdag doet en wie het rapport schrijft (voornaam). */
+    auditdag_door: string; rapport_door: string
+  }
 }
 
 export const STANDAARD_WERKING: WerkingInstellingen = {
   domeinen: { solutions: 'Marco', media: 'Chiara', financien_legal: 'Bram', interne_werking: 'Marco' },
   weekoverleg: { dag: 5, van: '16:00', duur_min: 30, reeks_id: null },
   planning: { management: 'Chiara', uitvoering: 'Yasmine', shoot: 'Bram' },
+  verkoop: { audit_basis: 450, audit_per_proces: 295, max_processen: 5, opvolg_dagen: 7, presentatie_max_dagen: 7, presentatie_min_per_proces: 10, auditdag_door: 'Marco', rapport_door: 'Jonathan' },
 }
 
 // ── Nakijken ────────────────────────────────────────────────────────────────
@@ -70,7 +78,8 @@ const UUID = /^[0-9a-f-]{36}$/i
 export function leesWerking(ruw: unknown): WerkingInstellingen {
   const r = obj(ruw)
   const S = STANDAARD_WERKING
-  const dom = obj(r.domeinen), ov = obj(r.weekoverleg), pl = obj(r.planning)
+  const dom = obj(r.domeinen), ov = obj(r.weekoverleg), pl = obj(r.planning), vk = obj(r.verkoop)
+  const V = S.verkoop
   return {
     domeinen: Object.fromEntries(DOMEINEN.map((d) => [d.key, naamOf(dom[d.key], S.domeinen[d.key])])) as Record<Domein, string>,
     weekoverleg: {
@@ -80,7 +89,22 @@ export function leesWerking(ruw: unknown): WerkingInstellingen {
       reeks_id: typeof ov.reeks_id === 'string' && UUID.test(ov.reeks_id) ? ov.reeks_id : null,
     },
     planning: Object.fromEntries(WERK_SOORTEN.map((s) => [s.key, naamOf(pl[s.key], S.planning[s.key])])) as Record<WerkSoort, string>,
+    verkoop: {
+      audit_basis: getalOf(vk.audit_basis, V.audit_basis, 0, 100_000),
+      audit_per_proces: getalOf(vk.audit_per_proces, V.audit_per_proces, 0, 100_000),
+      max_processen: Math.round(getalOf(vk.max_processen, V.max_processen, 1, 20)),
+      opvolg_dagen: Math.round(getalOf(vk.opvolg_dagen, V.opvolg_dagen, 1, 60)),
+      presentatie_max_dagen: Math.round(getalOf(vk.presentatie_max_dagen, V.presentatie_max_dagen, 1, 60)),
+      presentatie_min_per_proces: Math.round(getalOf(vk.presentatie_min_per_proces, V.presentatie_min_per_proces, 1, 120)),
+      auditdag_door: naamOf(vk.auditdag_door, V.auditdag_door),
+      rapport_door: naamOf(vk.rapport_door, V.rapport_door),
+    },
   }
+}
+
+/** Auditprijs bij Solutions: basis + prijs per proces (instellingen, nooit vast in de code). */
+export function auditPrijs(processen: number, v: Pick<WerkingInstellingen['verkoop'], 'audit_basis' | 'audit_per_proces'>): number {
+  return Math.round((v.audit_basis + v.audit_per_proces * processen) * 100) / 100
 }
 
 /** Wie is eigenaar van dit domein? Leeg of "meerdere" = niemand (stemming). */

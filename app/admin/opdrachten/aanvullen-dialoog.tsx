@@ -72,7 +72,7 @@ export function AanvullenDialoog({ kaarten, onClose, onKlaar }: { kaarten: Kaart
                   </div>
                   {o.diensten.length === 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
-                      {DIENSTEN.map((d) => {
+                      {DIENSTEN.filter((d) => d.key !== 'ngs' || r.diensten.includes('ngs')).map((d) => {
                         const aan = r.diensten.includes(d.key as string)
                         return (
                           <button key={d.key} type="button" onClick={() => wissel(o.id, d.key as string)} aria-pressed={aan}

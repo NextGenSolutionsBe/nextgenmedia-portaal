@@ -395,12 +395,12 @@ export async function klantSolutions(admin: Admin, clientIdIn: unknown): Promise
   return { deals: (deals ?? []) as KlantSolutions['deals'], projecten: levering.projecten, care: levering.care }
 }
 
-/** Voor het belletje: geen plan 5 dagen na de tijdscan, en Care-controles die te laat zijn. */
+/** Voor het belletje: geen plan 5 dagen na de audit, en Care-controles die te laat zijn. */
 export async function leveringMeldingen(admin: Admin): Promise<{ id: string; titel: string; href: string; hoog: boolean; datum: string }[]> {
   const l = await laadLevering(admin)
   const d = vandaag()
   const uit: { id: string; titel: string; href: string; hoog: boolean; datum: string }[] = []
-  for (const p of l.projecten) if (p.planTeLaat) uit.push({ id: `ngs-plan:${p.id}:${p.tijdscan_op}`, titel: `${p.titel}: ${p.planTeLaat} dagen na de tijdscan nog geen goedgekeurd plan`, href: `/admin/nextgensolutions/levering?project=${p.id}`, hoog: p.planTeLaat > 10, datum: d })
+  for (const p of l.projecten) if (p.planTeLaat) uit.push({ id: `ngs-plan:${p.id}:${p.tijdscan_op}`, titel: `${p.titel}: ${p.planTeLaat} dagen na de audit nog geen goedgekeurd plan`, href: `/admin/nextgensolutions/levering?project=${p.id}`, hoog: p.planTeLaat > 10, datum: d })
   for (const c of l.care) if (c.teLaat !== null && c.teLaat > 0) uit.push({ id: `ngs-care:${c.id}:${c.volgende}`, titel: `Care-controle ${c.teLaat} dag${c.teLaat === 1 ? '' : 'en'} te laat: ${c.naam}${c.klant ? ` (${c.klant})` : ''}`, href: '/admin/nextgensolutions/levering?tab=care', hoog: c.teLaat > 14, datum: d })
   return uit
 }

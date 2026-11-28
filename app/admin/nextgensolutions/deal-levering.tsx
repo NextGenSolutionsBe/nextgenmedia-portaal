@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { Loader2, Rocket, FileText, CalendarPlus, ArrowRight } from 'lucide-react'
+import { Loader2, Rocket, FileText, ArrowRight } from 'lucide-react'
 import { KlantKiezer, type KlantOptie } from '@/components/admin/klant-kiezer'
 import { projectFaseLabel, type ProjectFase } from '@/lib/ngs/levering'
 import type { Deal } from '@/lib/ngs/model'
@@ -13,7 +13,7 @@ import { lever } from './levering/care'
 /**
  * Fase 5 in het dealvenster: de deal aan een klant in de app koppelen (bestaand
  * of nieuw, met btw-opzoeking) en na Closed Won de volgende stappen: het
- * leveringsproject, een contract en de tijdscan. Alles op een klik, niets vanzelf.
+ * leveringsproject en een contract. De audit gebeurt vóór Closed Won. Alles op een klik, niets vanzelf.
  */
 export function DealLevering({ deal, onVernieuw }: { deal: Deal; onVernieuw: () => void }) {
   const [klanten, setKlanten] = useState<KlantOptie[] | null>(null)
@@ -59,9 +59,9 @@ export function DealLevering({ deal, onVernieuw }: { deal: Deal; onVernieuw: () 
               : project ? <Link href={`/admin/nextgensolutions/levering?project=${project.id}`} className="btn-primary !py-1.5 !text-sm">Project openen · {projectFaseLabel(project.fase)}<ArrowRight className="h-4 w-4" /></Link>
                 : <button type="button" onClick={start} disabled={!!bezig} className="btn-primary !py-1.5 !text-sm">{bezig === 'start' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}Leveringsproject starten</button>}
             {klant
-              ? <Link href={`/admin/contracts/templates?client=${klant}`} className="btn-secondary !py-1.5 !text-sm"><FileText className="h-4 w-4" />Contract opmaken</Link>
+              ? <Link href={`/admin/contracts/templates?client=${klant}&deal=${deal.id}`} className="btn-secondary !py-1.5 !text-sm"><FileText className="h-4 w-4" />Contract opmaken</Link>
               : <span className="text-xs text-green-900 self-center">Koppel eerst een klant voor het contract.</span>}
-            <Link href={`/admin/meetings?plan=1${klant ? `&klant=${klant}` : ''}`} className="btn-secondary !py-1.5 !text-sm"><CalendarPlus className="h-4 w-4" />Tijdscan inplannen</Link>
+            {/* De audit gebeurt vóór Closed Won (nieuwe werking, 28 nov 2026): hier enkel nog project en contract. */}
           </div>
           <p className="text-[11px] text-green-900/80">Na het tekenen zet de app de facturen van het contract klaar, zoals bij elk contract.</p>
         </div>

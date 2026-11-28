@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useState, type ReactNode } from 'react'
-import { DOMEINEN, WERK_SOORTEN, leesWerking, eindUur, type WerkingInstellingen } from '@/lib/werking/instellingen'
+import { DOMEINEN, WERK_SOORTEN, leesWerking, eindUur, auditPrijs, type WerkingInstellingen } from '@/lib/werking/instellingen'
 import type { Ctx } from './instellingen-client'
-import { Kop, OpslaanBalk, Groep, Veld, INP } from './ui'
+import { Kop, OpslaanBalk, Groep, Veld, Getal, INP } from './ui'
 
 /**
  * Werking (28 nov 2026): de afspraken van de nieuwe werking als instellingen.
@@ -79,6 +79,20 @@ export function SectieWerking({ ctx }: { ctx: Ctx }) {
           {WERK_SOORTEN.map((s) => (
             <Naam key={s.key} label={s.label} hint={s.uitleg} value={v.planning[s.key]} disabled={uit} onChange={(w) => zet('planning', { [s.key]: w } as Partial<WerkingInstellingen['planning']>)} />
           ))}
+        </Rij>
+      </Groep>
+
+      <Groep titel="Verkoop Solutions">
+        <p className="text-[12px] text-gray-500 -mt-1 mb-2">Auditprijs = basis + prijs per proces. Nu: {[1, 2, 3, 4, 5].filter((n) => n <= v.verkoop.max_processen).map((n) => `${n} → € ${auditPrijs(n, v.verkoop).toLocaleString('nl-BE')}`).join(' · ')}</p>
+        <Rij>
+          <Getal label="Audit: basis" eenheid="€" value={v.verkoop.audit_basis} min={0} onChange={(w) => zet('verkoop', { audit_basis: w })} />
+          <Getal label="Audit: per proces" eenheid="€" value={v.verkoop.audit_per_proces} min={0} onChange={(w) => zet('verkoop', { audit_per_proces: w })} />
+          <Getal label="Hoogstens processen per audit" value={v.verkoop.max_processen} min={1} max={20} onChange={(w) => zet('verkoop', { max_processen: w })} />
+          <Getal label="Opvolgen: elke" eenheid="dagen" value={v.verkoop.opvolg_dagen} min={1} max={60} onChange={(w) => zet('verkoop', { opvolg_dagen: w })} hint="Na een belpoging stelt de app de volgende opvolging zo ver voor." />
+          <Getal label="Presentatie: hoogstens na de auditdag" eenheid="dagen" value={v.verkoop.presentatie_max_dagen} min={1} max={60} onChange={(w) => zet('verkoop', { presentatie_max_dagen: w })} />
+          <Getal label="Presentatie: per proces" eenheid="min" value={v.verkoop.presentatie_min_per_proces} min={1} max={120} onChange={(w) => zet('verkoop', { presentatie_min_per_proces: w })} />
+          <Naam label="Auditdag ter plaatse" value={v.verkoop.auditdag_door} disabled={uit} onChange={(w) => zet('verkoop', { auditdag_door: w })} />
+          <Naam label="Rapport schrijft" value={v.verkoop.rapport_door} disabled={uit} onChange={(w) => zet('verkoop', { rapport_door: w })} />
         </Rij>
       </Groep>
       </div>

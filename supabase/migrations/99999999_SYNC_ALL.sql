@@ -9206,3 +9206,45 @@ ON CONFLICT (key) DO NOTHING;
 INSERT INTO app_settings (key, value, updated_at)
 SELECT 'contentplanning_backup_20261128', value, now() FROM app_settings WHERE key = 'contentplanning'
 ON CONFLICT (key) DO NOTHING;
+
+-- ── Nieuwe werking fase 2 (28 nov 2026): verkoop bij Solutions ───────────────
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS vervolg_op timestamptz;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS vervolg_meeting_id uuid;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS processen integer;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_prijs numeric;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_contract_id uuid;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_buiten_app boolean NOT NULL DEFAULT false;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_buiten_notitie text;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS auditdag_op date;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS presentatie_op date;
+ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_checklist jsonb NOT NULL DEFAULT '{}'::jsonb;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ngs_deals_processen_check') THEN
+    ALTER TABLE ngs_deals ADD CONSTRAINT ngs_deals_processen_check CHECK (processen IS NULL OR (processen BETWEEN 1 AND 20));
+  END IF;
+END $$;
+ALTER TABLE ngs_deals DROP CONSTRAINT IF EXISTS ngs_deals_fase_check;
+ALTER TABLE ngs_deals ADD CONSTRAINT ngs_deals_fase_check CHECK (fase = ANY (ARRAY['afspraak','voorstel','opvolgen','audit','opvolgen_rapport','won','lost']));
+ALTER TABLE ngs_deal_notities ADD COLUMN IF NOT EXISTS uitkomst text;
+CREATE TABLE IF NOT EXISTS ngs_deal_fases (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id uuid NOT NULL REFERENCES ngs_deals(id) ON DELETE CASCADE,
+  van text, naar text NOT NULL, op timestamptz NOT NULL DEFAULT now(), door text
+);
+CREATE INDEX IF NOT EXISTS ngs_deal_fases_deal_idx ON ngs_deal_fases (deal_id, op);
+CREATE INDEX IF NOT EXISTS ngs_deal_fases_naar_idx ON ngs_deal_fases (naar, op);
+ALTER TABLE ngs_deal_fases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE klant_meetings ADD COLUMN IF NOT EXISTS ngs_deal_id uuid;
+CREATE INDEX IF NOT EXISTS klant_meetings_ngs_deal_idx ON klant_meetings (ngs_deal_id) WHERE ngs_deal_id IS NOT NULL;
+ALTER TABLE contracts ADD COLUMN IF NOT EXISTS ngs_deal_id uuid;
+CREATE INDEX IF NOT EXISTS contracts_ngs_deal_idx ON contracts (ngs_deal_id) WHERE ngs_deal_id IS NOT NULL;
+ALTER TABLE opdrachten ADD COLUMN IF NOT EXISTS ngs_deal_id uuid;
+ALTER TABLE opdrachten ADD COLUMN IF NOT EXISTS ngs_keuze text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'opdrachten_ngs_keuze_check') THEN
+    ALTER TABLE opdrachten ADD CONSTRAINT opdrachten_ngs_keuze_check CHECK (ngs_keuze IS NULL OR ngs_keuze IN ('verhuisd','laten'));
+  END IF;
+END $$;
+INSERT INTO ngs_deal_fases (deal_id, van, naar, op, door)
+SELECT d.id, NULL, d.fase, coalesce(d.fase_sinds, d.created_at), 'Beginstand 28 nov 2026'
+FROM ngs_deals d WHERE NOT EXISTS (SELECT 1 FROM ngs_deal_fases f WHERE f.deal_id = d.id);

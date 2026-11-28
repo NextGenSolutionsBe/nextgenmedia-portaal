@@ -1,0 +1,9 @@
+-- Terugdraaien nieuwe werking fase 2 (28 nov 2026). Enkel uitvoeren als het echt moet.
+-- Deals in Audit of Opvolgen rapport eerst terug naar Opvolgen (anders weigert de oude controle):
+-- UPDATE ngs_deals SET fase = 'opvolgen' WHERE fase IN ('audit','opvolgen_rapport');
+-- ALTER TABLE ngs_deals DROP CONSTRAINT IF EXISTS ngs_deals_fase_check;
+-- ALTER TABLE ngs_deals ADD CONSTRAINT ngs_deals_fase_check CHECK (fase = ANY (ARRAY['afspraak','voorstel','opvolgen','won','lost']));
+-- Verhuisde Solutions-kaarten weer op het bord van Projecten:
+-- UPDATE opdrachten SET ngs_keuze = NULL WHERE ngs_keuze = 'verhuisd';
+-- (de deals die bij het verhuizen ontstonden blijven bestaan; weghalen = verwijderd_op invullen)
+-- Alle nieuwe kolommen en de tabel ngs_deal_fases zijn additief en mogen blijven staan.

@@ -333,7 +333,7 @@ export async function buildNotifications(): Promise<Notif[]> {
     } catch { /* tabellen bestaan pas na de migratie */ }
   })
 
-  // NextGenSolutions-levering (fase 5): geen plan 5 dagen na de tijdscan, Care-controle te laat.
+  // NextGenSolutions-levering (fase 5): geen plan 5 dagen na de audit, Care-controle te laat.
   blok(async (out) => {
     try {
       const { leveringMeldingen } = await import('@/lib/ngs/levering-server')
