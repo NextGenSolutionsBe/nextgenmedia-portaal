@@ -239,6 +239,8 @@ export type CareItem = {
   controle_elke_dagen: number | null
   laatste_controle: string | null
   notitie: string | null
+  /** Care-pakket (nieuwe werking fase 6): basis, plus of pro. */
+  pakket?: string | null
 }
 
 export function controleerCare(b: Record<string, unknown>): { ok: true; care: Omit<CareItem, 'id'> } | { ok: false; fout: string } {

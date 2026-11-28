@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Check, Loader2, Plus, ShieldCheck, Archive, Pencil } from 'lucide-react'
 import { CARE_STATUSSEN, type CareItem } from '@/lib/ngs/levering'
 import { Venster, inp, lbl, dagKort, eurCent } from '../ui'
+import { CareDetailVenster } from './care-detail'
 
 export type CareRij = CareItem & { klant?: string | null; volgende?: string | null; teLaat?: number | null }
 
@@ -18,6 +19,7 @@ export async function lever(body: Record<string, unknown>) {
 /** Care-register: wat we voor een klant draaien en wanneer het nagekeken moet worden. */
 export function CareLijst({ items, onVernieuw, nieuw }: { items: CareRij[]; onVernieuw: () => void; nieuw?: { client_id?: string | null; project_id?: string | null } }) {
   const [bewerk, setBewerk] = useState<CareRij | 'nieuw' | null>(null)
+  const [detail, setDetail] = useState<string | null>(null)
   const [bezig, setBezig] = useState<string | null>(null)
   const doe = async (body: Record<string, unknown>, sleutel: string, ok: string) => {
     setBezig(sleutel)
@@ -32,7 +34,7 @@ export function CareLijst({ items, onVernieuw, nieuw }: { items: CareRij[]; onVe
             <div className="flex items-start gap-2">
               <ShieldCheck className={`h-4 w-4 mt-0.5 shrink-0 ${c.status === 'actief' ? 'text-gray-900' : 'text-gray-300'}`} />
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium">{c.naam}{c.klant ? <span className="text-gray-500 font-normal"> · {c.klant}</span> : null}</div>
+                <button type="button" onClick={() => setDetail(c.id)} className="text-sm font-medium text-left hover:underline">{c.naam}{c.klant ? <span className="text-gray-500 font-normal"> · {c.klant}</span> : null}{c.pakket ? <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide rounded-full border border-gray-200 px-1.5 py-0.5 text-gray-600">{c.pakket}</span> : null}</button>
                 <div className="text-[11px] text-gray-500 mt-0.5">
                   {CARE_STATUSSEN.find((s) => s.key === c.status)?.label}
                   {c.care_contract ? ` · Care-contract${c.maandbedrag ? ` ${eurCent(c.maandbedrag)}/m` : ''}` : ''}
@@ -51,6 +53,7 @@ export function CareLijst({ items, onVernieuw, nieuw }: { items: CareRij[]; onVe
         ))}
       </ul>
       <button type="button" onClick={() => setBewerk('nieuw')} className="btn-secondary !py-1.5 !text-sm"><Plus className="h-4 w-4" />In Care opnemen</button>
+      {detail && <CareDetailVenster id={detail} onSluit={() => setDetail(null)} onVernieuw={onVernieuw} />}
       {bewerk && <CareVenster c={bewerk === 'nieuw' ? null : bewerk} basis={nieuw} onSluit={() => setBewerk(null)} onKlaar={() => { setBewerk(null); onVernieuw() }} />}
     </div>
   )

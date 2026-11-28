@@ -28,13 +28,18 @@ export function SolutionsKlant({ data, magGoedkeuren }: { data: { projecten: Kla
                   {c.systemen.length > 0 && <p className="text-xs text-gray-500 mt-0.5">{c.systemen.join(' · ')}</p>}
                 </div>
                 <div className="text-xs text-gray-600 sm:text-right shrink-0">
-                  <p className="font-medium">{c.status === 'actief' ? 'Actief' : 'Gepauzeerd'}{c.care_contract ? ' · Care-contract' : ''}</p>
+                  <p className="font-medium">{c.status === 'actief' ? 'Actief' : 'Gepauzeerd'}{c.stand ? ` · Care ${c.stand.pakket}` : c.care_contract ? ' · Care-contract' : ''}</p>
                   {c.laatste_controle && <p>Laatst nagekeken op {datum(c.laatste_controle)}</p>}
                   {c.volgende && <p>Volgende controle {datum(c.volgende)}</p>}
                 </div>
               </li>
             ))}
           </ul>
+          {data.care.some((c) => c.stand) && (
+            <ul className="grid sm:grid-cols-2 gap-2">
+              {data.care.filter((c) => c.stand).map((c) => <CareStand key={c.id} naam={c.naam} s={c.stand!} />)}
+            </ul>
+          )}
         </section>
       )}
     </div>
@@ -128,6 +133,31 @@ function StoryRij({ s, magGoedkeuren }: { s: NonNullable<KlantProject['stories']
           <button type="button" onClick={keurGoed} disabled={bezig} className="btn-primary !text-xs !py-1.5" style={{ background: BLAUW }}>{bezig && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Goedkeuren</button>
         ) : s.magGoedkeuren ? <p className="text-xs text-gray-500">Wacht op een akkoord van iemand die mag goedkeuren.</p> : null}
       </div>
+    </li>
+  )
+}
+
+function Balk({ label, gebruikt, limiet }: { label: string; gebruikt: number | null; limiet: number }) {
+  const pct = gebruikt === null || !(limiet > 0) ? null : Math.min(100, Math.round((gebruikt / limiet) * 100))
+  return (
+    <div>
+      <div className="flex justify-between text-xs"><span>{label}</span><span className="tabular-nums text-gray-600">{gebruikt === null ? 'nog niet gemeten' : `${gebruikt.toLocaleString('nl-BE')} van ${limiet} GB`}</span></div>
+      <div className="h-1.5 rounded-full bg-gray-100 mt-1 overflow-hidden">{pct !== null && <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct >= 80 ? '#B45309' : BLAUW }} />}</div>
+    </div>
+  )
+}
+
+/** Wat het Care-pakket inhoudt en hoeveel er gebruikt is (enkel cijfers die de klant aangaan). */
+function CareStand({ naam, s }: { naam: string; s: NonNullable<KlantCare['stand']> }) {
+  return (
+    <li className="rounded-xl border border-gray-200 p-3 space-y-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+        <p className="font-medium text-sm">{naam}</p>
+        <p className="text-xs text-gray-600">Care {s.pakket} · reactie binnen {s.reactie}</p>
+      </div>
+      <Balk label="Databank" gebruikt={s.db.gebruikt} limiet={s.db.limiet} />
+      <Balk label="Bestanden" gebruikt={s.bestanden.gebruikt} limiet={s.bestanden.limiet} />
+      <p className="text-xs text-gray-600">{s.uren.beschikbaar > 0 ? `Kleine aanpassingen: nog ${s.uren.resterend.toLocaleString('nl-BE')} van ${s.uren.beschikbaar} uur deze maand.` : 'Kleine aanpassingen zitten niet in dit pakket.'}{s.gemeten_op ? ` Gemeten op ${datum(s.gemeten_op)}.` : ''}</p>
     </li>
   )
 }

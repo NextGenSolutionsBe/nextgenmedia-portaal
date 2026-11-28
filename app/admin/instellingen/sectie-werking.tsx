@@ -130,6 +130,35 @@ export function SectieWerking({ ctx }: { ctx: Ctx }) {
           <Naam label="Bouwt standaard" value={v.levering.verantwoordelijke} disabled={uit} onChange={(w) => zet('levering', { verantwoordelijke: w })} />
         </Rij>
       </Groep>
+
+      <Groep titel="Care-pakketten (Solutions)">
+        <p className="text-[12px] text-gray-500 -mt-1 mb-2">{v.care.bevestigd ? 'Bevestigd.' : 'Dit is het voorstel uit de opdracht en nog niet bevestigd.'} Reactietijd in werkuren: één werkdag = de werkuren hieronder.</p>
+        <div className="space-y-3">
+          {v.care.pakketten.map((p, i) => {
+            const zetP = (w: Partial<typeof p>) => zet('care', { pakketten: v.care.pakketten.map((x, j) => (j === i ? { ...x, ...w } : x)) })
+            return (
+              <div key={p.key} className="rounded-xl border border-gray-100 p-3 space-y-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
+                  <Veld label="Naam"><input className={INP} value={p.naam} maxLength={30} disabled={uit} onChange={(e) => zetP({ naam: e.target.value })} /></Veld>
+                  <Getal label="Prijs per maand" eenheid="€" value={p.prijs} min={0} onChange={(w) => zetP({ prijs: w })} />
+                  <Getal label="Databank" eenheid="GB" value={p.db_gb} min={0} onChange={(w) => zetP({ db_gb: w })} />
+                  <Getal label="Bestanden" eenheid="GB" value={p.bestanden_gb} min={0} onChange={(w) => zetP({ bestanden_gb: w })} />
+                  <Getal label="Reactietijd" eenheid="werkuren" value={p.reactie_werkuren} min={1} onChange={(w) => zetP({ reactie_werkuren: w })} />
+                  <Getal label="Aanpassingen" eenheid="u/maand" value={p.uren_per_maand} min={0} onChange={(w) => zetP({ uren_per_maand: w })} />
+                  <label className="flex items-center gap-2 text-sm pb-2"><input type="checkbox" checked={p.monitoring} disabled={uit} onChange={(e) => zetP({ monitoring: e.target.checked })} />Monitoring</label>
+                  <label className="flex items-center gap-2 text-sm pb-2"><input type="checkbox" checked={p.maandrapport} disabled={uit} onChange={(e) => zetP({ maandrapport: e.target.checked })} />Maandrapport</label>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <Rij>
+          <Veld label="Werkuren van"><input className={INP} value={v.care.werkdag_van} disabled={uit} onChange={(e) => zet('care', { werkdag_van: e.target.value })} placeholder="09:00" /></Veld>
+          <Veld label="Werkuren tot"><input className={INP} value={v.care.werkdag_tot} disabled={uit} onChange={(e) => zet('care', { werkdag_tot: e.target.value })} placeholder="17:00" /></Veld>
+          <Getal label="Migratie naar een ander platform, vanaf" eenheid="€" value={v.care.migratie_vanaf} min={0} onChange={(w) => zet('care', { migratie_vanaf: w })} hint="Offerte-item; een overdracht zonder Care is gratis." />
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={v.care.bevestigd} disabled={uit} onChange={(e) => zet('care', { bevestigd: e.target.checked })} />Pakketten bevestigd</label>
+        </Rij>
+      </Groep>
       </div>
 
       <OpslaanBalk vuil={vuil} bezig={ctx.bezig} onOpslaan={() => ctx.opslaan('werking', leesWerking(v), [])} onAnnuleer={() => setV(bron)} bijgewerkt={ctx.bijgewerkt.werking} />

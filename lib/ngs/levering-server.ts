@@ -61,6 +61,7 @@ function naarCare(r: Record<string, unknown>): CareItem {
     omschrijving: (r.omschrijving as string | null) ?? null, systemen: Array.isArray(r.systemen) ? (r.systemen as string[]) : [], status: (['actief', 'gepauzeerd', 'gestopt'].includes(String(r.status)) ? r.status : 'actief') as CareItem['status'],
     care_contract: r.care_contract === true, maandbedrag: getal(r.maandbedrag), controle_elke_dagen: getal(r.controle_elke_dagen),
     laatste_controle: r.laatste_controle ? String(r.laatste_controle).slice(0, 10) : null, notitie: (r.notitie as string | null) ?? null,
+    pakket: (r.pakket as string | null) ?? null,
   }
 }
 
@@ -412,6 +413,8 @@ export async function leveringMeldingen(admin: Admin): Promise<{ id: string; tit
   const uit: { id: string; titel: string; href: string; hoog: boolean; datum: string }[] = []
   for (const p of l.projecten) if (p.planTeLaat) uit.push({ id: `ngs-plan:${p.id}:${p.tijdscan_op}`, titel: `${p.titel}: ${p.planTeLaat} dagen na de audit nog geen goedgekeurd plan`, href: `/admin/nextgensolutions/levering?project=${p.id}`, hoog: p.planTeLaat > 10, datum: d })
   for (const c of l.care) if (c.teLaat !== null && c.teLaat > 0) uit.push({ id: `ngs-care:${c.id}:${c.volgende}`, titel: `Care-controle ${c.teLaat} dag${c.teLaat === 1 ? '' : 'en'} te laat: ${c.naam}${c.klant ? ` (${c.klant})` : ''}`, href: '/admin/nextgensolutions/levering?tab=care', hoog: c.teLaat > 14, datum: d })
+  // Care (nieuwe werking fase 6): opslag vanaf 80%, supportvragen in gevaar, monitoring-alarm.
+  try { const { careMeldingen } = await import('./care-server'); uit.push(...await careMeldingen(admin)) } catch { /* de rest van de meldingen blijft */ }
   return uit
 }
 
@@ -438,7 +441,11 @@ export type KlantProject = {
   /** Per workflow de fase met een korte uitleg (nieuwe werking fase 4). Nooit prijs, uren of wie bouwt. */
   workflows: import('./workflow-levering').KlantWfLevering[]
 }
-export type KlantCare = Pick<CareItem, 'id' | 'naam' | 'omschrijving' | 'systemen' | 'status' | 'care_contract' | 'laatste_controle'> & { volgende: string | null }
+export type KlantCare = Pick<CareItem, 'id' | 'naam' | 'omschrijving' | 'systemen' | 'status' | 'care_contract' | 'laatste_controle'> & {
+  volgende: string | null
+  /** Het pakket met limieten, gebruik en de resterende uren van deze maand (nieuwe werking fase 6). */
+  stand: Awaited<ReturnType<typeof import('./care-server').klantCareStand>>[string] | null
+}
 
 export async function portaalSolutions(admin: Admin, clientIdIn: unknown): Promise<{ projecten: KlantProject[]; care: KlantCare[] }> {
   const clientId = moetId(clientIdIn, 'Klant')
@@ -454,6 +461,8 @@ export async function portaalSolutions(admin: Admin, clientIdIn: unknown): Promi
   const stories = ((st ?? []) as Record<string, unknown>[]).map(naarStory)
   const { klantWorkflows } = await import('./workflow-levering-server')
   const wf = await klantWorkflows(admin, projecten.map((p) => p.id)).catch(() => ({} as Record<string, import('./workflow-levering').KlantWfLevering[]>))
+  const { klantCareStand } = await import('./care-server')
+  const careStand = await klantCareStand(admin, ((cr ?? []) as { id: string }[]).map((c) => c.id)).catch(() => ({} as Awaited<ReturnType<typeof klantCareStand>>))
   const dag = vandaag()
   return {
     projecten: projecten.map((p) => ({
@@ -470,7 +479,7 @@ export async function portaalSolutions(admin: Admin, clientIdIn: unknown): Promi
     })),
     care: ((cr ?? []) as Record<string, unknown>[]).map(naarCare).filter((c) => c.status !== 'gestopt').map((c) => ({
       id: c.id, naam: c.naam, omschrijving: c.omschrijving, systemen: c.systemen, status: c.status, care_contract: c.care_contract,
-      laatste_controle: c.laatste_controle, volgende: volgendeControle(c, dag).op,
+      laatste_controle: c.laatste_controle, volgende: volgendeControle(c, dag).op, stand: careStand[c.id] ?? null,
     })),
   }
 }

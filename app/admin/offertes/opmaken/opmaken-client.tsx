@@ -109,7 +109,7 @@ function Kaart({ titel, sub, children, rechts }: { titel: string; sub?: string; 
   )
 }
 
-export function OfferteOpmaken({ beginKlant, opdrachtId, offerteId }: { beginKlant: string | null; opdrachtId: string | null; offerteId: string | null }) {
+export function OfferteOpmaken({ beginKlant, opdrachtId, offerteId, migratieVanaf = null }: { beginKlant: string | null; opdrachtId: string | null; offerteId: string | null; migratieVanaf?: number | null }) {
   const router = useRouter()
   const [klanten, setKlanten] = useState<KlantOptie[] | null>(null)
   const [klant, setKlant] = useState<KlantOptie | null>(null)
@@ -303,7 +303,12 @@ export function OfferteOpmaken({ beginKlant, opdrachtId, offerteId }: { beginKla
                 <button type="button" onClick={() => setInhoud((i) => ({ ...i, extra: i.extra.filter((_, j) => j !== idx) }))} className="h-9 w-9 shrink-0 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-red-600" aria-label="Post weghalen"><Trash2 className="h-4 w-4" /></button>
               </div>
             ))}
-            <button type="button" onClick={() => setInhoud((i) => ({ ...i, extra: [...i.extra, { omschrijving: '', bedrag: '' }] }))} className="btn-secondary text-xs"><Plus className="h-3.5 w-3.5" />Post toevoegen</button>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => setInhoud((i) => ({ ...i, extra: [...i.extra, { omschrijving: '', bedrag: '' }] }))} className="btn-secondary text-xs"><Plus className="h-3.5 w-3.5" />Post toevoegen</button>
+              {merk === 'nextgensolutions' && migratieVanaf !== null && !inhoud.extra.some((e) => e.omschrijving.startsWith('Migratie naar een ander platform')) && (
+                <button type="button" onClick={() => setInhoud((i) => ({ ...i, extra: [...i.extra, { omschrijving: `Migratie naar een ander platform (vanaf € ${migratieVanaf.toLocaleString('nl-BE')})`, bedrag: String(migratieVanaf) }] }))} className="btn-secondary text-xs"><Plus className="h-3.5 w-3.5" />Migratie</button>
+              )}
+            </div>
           </div>
         </Kaart>
       </div>
