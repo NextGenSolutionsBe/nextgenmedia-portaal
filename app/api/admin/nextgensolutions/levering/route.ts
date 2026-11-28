@@ -11,6 +11,7 @@ import {
   bewaarCare, careGecontroleerd, archiveerCare, klantSolutions,
 } from '@/lib/ngs/levering-server'
 import { voorstelUitTijdscan } from '@/lib/ngs/levering-ai'
+import { CareFout, careDetail, careActie } from '@/lib/ngs/care-server'
 import { WfFout, workflowsVanProject, overnemenUitRapport, nieuweWorkflow, workflowActie, videoMailVoorstel } from '@/lib/ngs/workflow-levering-server'
 
 export const dynamic = 'force-dynamic'
@@ -38,6 +39,7 @@ export async function GET(req: NextRequest) {
   try {
     const admin = createAdminSupabaseClient()
     const sp = req.nextUrl.searchParams
+    if (sp.get('care')) return NextResponse.json(await careDetail(admin, sp.get('care')), { headers: { 'Cache-Control': 'no-store' } })
     if (sp.get('workflows')) return NextResponse.json(await workflowsVanProject(admin, sp.get('workflows')), { headers: { 'Cache-Control': 'no-store' } })
     if (sp.get('videomail')) return NextResponse.json(await videoMailVoorstel(admin, sp.get('videomail'), await wie(user)))
     if (sp.get('project')) return NextResponse.json(await projectDetail(admin, sp.get('project')))
@@ -45,7 +47,7 @@ export async function GET(req: NextRequest) {
     if (sp.get('klant')) return NextResponse.json(await klantSolutions(admin, sp.get('klant')))
     return NextResponse.json(await laadLevering(admin), { headers: { 'Cache-Control': 'no-store' } })
   } catch (e) {
-    if (e instanceof LeveringFout || e instanceof WfFout) return NextResponse.json({ error: e.message }, { status: e.status })
+    if (e instanceof LeveringFout || e instanceof WfFout || e instanceof CareFout) return NextResponse.json({ error: e.message }, { status: e.status })
     return NextResponse.json({ error: safeMessage(e, 'ngs-levering.GET') }, { status: 500 })
   }
 }
@@ -89,6 +91,9 @@ export async function POST(req: NextRequest) {
       case 'care.bewaar': antwoord = { ok: true, id: await bewaarCare(admin, b, door) }; break
       case 'care.gecontroleerd': await careGecontroleerd(admin, b.id); break
       case 'care.archiveer': await archiveerCare(admin, b.id); break
+      case 'care.pakket': case 'care.links': case 'care.gebruik': case 'care.meten': case 'care.uren': case 'care.uren_weg':
+      case 'care.support': case 'care.support_opgelost': case 'care.overdracht': case 'care.factuur':
+        antwoord = await careActie(admin, b, door); break
       case 'wf.overnemen': antwoord = { ok: true, aantal: await overnemenUitRapport(admin, b.id, door) }; break
       case 'wf.nieuw': antwoord = { ok: true, id: await nieuweWorkflow(admin, b.id, b.naam, door) }; break
       case 'wf.fase': case 'wf.wacht': case 'wf.wacht_stop': case 'wf.links': case 'wf.wijzig': case 'wf.call': case 'wf.call_weg': case 'wf.video_gestuurd': case 'wf.weg':
@@ -102,7 +107,7 @@ export async function POST(req: NextRequest) {
     try { revalidatePath('/admin/nextgensolutions/levering') } catch { /* */ }
     return NextResponse.json(antwoord)
   } catch (e) {
-    if (e instanceof LeveringFout || e instanceof WfFout) return NextResponse.json({ error: e.message }, { status: e.status })
+    if (e instanceof LeveringFout || e instanceof WfFout || e instanceof CareFout) return NextResponse.json({ error: e.message }, { status: e.status })
     return NextResponse.json({ error: safeMessage(e, 'ngs-levering.POST') }, { status: 500 })
   }
 }

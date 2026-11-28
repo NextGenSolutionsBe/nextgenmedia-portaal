@@ -51,6 +51,16 @@ export type WerkingInstellingen = {
   }
   /** Levering per workflow (fase 4): bouwtermijn, nazorg en wie standaard bouwt (voornaam). */
   levering: { bouw_dagen: number; nazorg_weken: number; nazorg_call_min: number; verantwoordelijke: string }
+  /** Care (fase 6): pakketten, werkuren voor de reactietijd en de prijs van een migratie. `bevestigd` = de zaakvoerders keurden de pakketten goed. */
+  care: { pakketten: CarePakket[]; werkdag_van: string; werkdag_tot: string; migratie_vanaf: number; bevestigd: boolean }
+}
+
+export const CARE_PAKKET_KEYS = ['basis', 'plus', 'pro'] as const
+export type CarePakketKey = (typeof CARE_PAKKET_KEYS)[number]
+/** Eén Care-pakket. De reactietijd staat in werkuren (een werkdag = de werkuren van één dag). */
+export type CarePakket = {
+  key: CarePakketKey; naam: string; prijs: number; db_gb: number; bestanden_gb: number
+  reactie_werkuren: number; uren_per_maand: number; monitoring: boolean; maandrapport: boolean
 }
 
 export const MATEN = [
@@ -75,6 +85,15 @@ export const STANDAARD_WERKING: WerkingInstellingen = {
     },
   },
   levering: { bouw_dagen: 14, nazorg_weken: 2, nazorg_call_min: 30, verantwoordelijke: 'Jonathan' },
+  // Voorstel uit de opdracht van 28 nov 2026, nog te bevestigen (Nog te beslissen 3).
+  care: {
+    pakketten: [
+      { key: 'basis', naam: 'Basis', prijs: 59, db_gb: 2, bestanden_gb: 10, reactie_werkuren: 16, uren_per_maand: 0, monitoring: false, maandrapport: false },
+      { key: 'plus', naam: 'Plus', prijs: 149, db_gb: 5, bestanden_gb: 50, reactie_werkuren: 8, uren_per_maand: 1, monitoring: false, maandrapport: false },
+      { key: 'pro', naam: 'Pro', prijs: 349, db_gb: 8, bestanden_gb: 100, reactie_werkuren: 4, uren_per_maand: 3, monitoring: true, maandrapport: true },
+    ],
+    werkdag_van: '09:00', werkdag_tot: '17:00', migratie_vanaf: 250, bevestigd: false,
+  },
 }
 
 // ── Nakijken ────────────────────────────────────────────────────────────────
@@ -103,7 +122,22 @@ export function leesWerking(ruw: unknown): WerkingInstellingen {
   const r = obj(ruw)
   const S = STANDAARD_WERKING
   const dom = obj(r.domeinen), ov = obj(r.weekoverleg), pl = obj(r.planning), vk = obj(r.verkoop), pr = obj(r.prijzen), mt = obj(pr.maten)
-  const V = S.verkoop, P = S.prijzen, L = S.levering, lv = obj(r.levering)
+  const V = S.verkoop, P = S.prijzen, L = S.levering, lv = obj(r.levering), C = S.care, cr = obj(r.care)
+  const ruwePakketten = Array.isArray(cr.pakketten) ? (cr.pakketten as unknown[]) : []
+  const pakket = (std: CarePakket): CarePakket => {
+    const x = obj(ruwePakketten.find((p) => obj(p).key === std.key))
+    const naam = typeof x.naam === 'string' && x.naam.trim() ? x.naam.replace(/\s+/g, ' ').trim().slice(0, 30) : std.naam
+    return {
+      key: std.key, naam,
+      prijs: getalOf(x.prijs, std.prijs, 0, 100_000),
+      db_gb: getalOf(x.db_gb, std.db_gb, 0, 10_000),
+      bestanden_gb: getalOf(x.bestanden_gb, std.bestanden_gb, 0, 100_000),
+      reactie_werkuren: getalOf(x.reactie_werkuren, std.reactie_werkuren, 1, 400),
+      uren_per_maand: getalOf(x.uren_per_maand, std.uren_per_maand, 0, 200),
+      monitoring: typeof x.monitoring === 'boolean' ? x.monitoring : std.monitoring,
+      maandrapport: typeof x.maandrapport === 'boolean' ? x.maandrapport : std.maandrapport,
+    }
+  }
   const maat = (k: Maat) => {
     const x = obj(mt[k]), d = P.maten[k]
     const leegOf = (v: unknown, std: number | null) => (v === null || v === '' ? null : v === undefined ? std : getalOf(v, std ?? 0, 0, 10_000_000))
@@ -142,6 +176,16 @@ export function leesWerking(ruw: unknown): WerkingInstellingen {
       nazorg_call_min: Math.round(getalOf(lv.nazorg_call_min, L.nazorg_call_min, 5, 240)),
       verantwoordelijke: naamOf(lv.verantwoordelijke, L.verantwoordelijke),
     },
+    care: (() => {
+      const van = uurOf(cr.werkdag_van, C.werkdag_van), tot = uurOf(cr.werkdag_tot, C.werkdag_tot)
+      const goed = tot > van
+      return {
+        pakketten: C.pakketten.map(pakket),
+        werkdag_van: goed ? van : C.werkdag_van, werkdag_tot: goed ? tot : C.werkdag_tot,
+        migratie_vanaf: getalOf(cr.migratie_vanaf, C.migratie_vanaf, 0, 100_000),
+        bevestigd: cr.bevestigd === true,
+      }
+    })(),
   }
 }
 

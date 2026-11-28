@@ -9328,3 +9328,49 @@ UPDATE bedrijven SET betaaltermijn_dagen = 30 WHERE slug = 'nextgensolutions' AN
 ALTER TABLE ngs_deals ADD COLUMN IF NOT EXISTS audit_factuur_id uuid REFERENCES invoices(id) ON DELETE SET NULL;
 ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS factuur_id uuid REFERENCES invoices(id) ON DELETE SET NULL;
 ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS verrekend_bedrag numeric;
+
+-- ═══ Nieuwe werking fase 6 (28 nov 2026): Care-pakketten en overdracht. Additief. ═══
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS pakket text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ngs_care_pakket_check') THEN
+    ALTER TABLE ngs_care ADD CONSTRAINT ngs_care_pakket_check CHECK (pakket IS NULL OR pakket IN ('basis','plus','pro'));
+  END IF;
+END $$;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS vercel_url text;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS supabase_ref text;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS github_url text;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS monitor_url text;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS db_gb numeric;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS bestanden_gb numeric;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS gemeten_op timestamptz;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS meetbron text;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS overdracht jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE ngs_care ADD COLUMN IF NOT EXISTS reeks_id uuid;
+CREATE TABLE IF NOT EXISTS ngs_care_uren (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  care_id uuid NOT NULL REFERENCES ngs_care(id) ON DELETE CASCADE,
+  datum date NOT NULL,
+  uren numeric NOT NULL CHECK (uren > 0 AND uren <= 24),
+  omschrijving text, door text, verwijderd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ngs_care_uren_care_idx ON ngs_care_uren (care_id, datum) WHERE verwijderd_op IS NULL;
+ALTER TABLE ngs_care_uren ENABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS ngs_care_support (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  care_id uuid NOT NULL REFERENCES ngs_care(id) ON DELETE CASCADE,
+  binnen_op timestamptz NOT NULL DEFAULT now(),
+  kanaal text NOT NULL DEFAULT 'telefoon' CHECK (kanaal IN ('telefoon','mail','klantapp')),
+  vraag text NOT NULL, deadline timestamptz NOT NULL, opgelost_op timestamptz, door text, opgelost_door text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ngs_care_support_open_idx ON ngs_care_support (care_id) WHERE opgelost_op IS NULL;
+ALTER TABLE ngs_care_support ENABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS ngs_care_checks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  care_id uuid NOT NULL REFERENCES ngs_care(id) ON DELETE CASCADE,
+  op timestamptz NOT NULL DEFAULT now(), ok boolean NOT NULL, status integer, ms integer, fout text
+);
+CREATE INDEX IF NOT EXISTS ngs_care_checks_care_idx ON ngs_care_checks (care_id, op DESC);
+ALTER TABLE ngs_care_checks ENABLE ROW LEVEL SECURITY;
+-- Monitoring (pg_cron, elke 10 minuten): SELECT cron.schedule('care-monitoring', '*/10 * * * *', $$ SELECT net.http_post(url := 'https://app.nextgenmedia.be/api/cron/care', headers := jsonb_build_object('Content-Type','application/json','x-sync-secret',(SELECT waarde FROM public.cron_geheimen WHERE sleutel = 'klantmeetings')), body := '{}'::jsonb, timeout_milliseconds := 58000); $$);

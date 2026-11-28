@@ -4,6 +4,7 @@
 
 ## Voortgang
 
+- **Fase 6: af en live (28 nov 2026).** Geen data omgezet: er stond nog niets in Care. De pakketten staan als voorstel (niet bevestigd). Opslag ophalen werkt pas met een Supabase-toegangstoken (`SUPABASE_MANAGEMENT_TOKEN` in Vercel); tot dan met de hand. Fouten uit Vercel van klantprojecten zitten niet in de monitoring: daarvoor is een Vercel-token per team nodig.
 - **Fase 5: af en live (28 nov 2026).** Geen facturen gemaakt voor bestaande deals (er zat nog geen deal in Audit). Solutions kreeg betaaltermijn 30 dagen; Media en Algemeen staan leeg, dus daar blijft het zoals het was (offertes 14, facturen 30: zie Nog te beslissen 2). Onderweg gevonden: een opgemaakte offerte van Solutions toonde "handelsnaam NextGenMedia"; dat komt nu uit de bedrijven-tabel.
 - **Fase 4: af en live (28 nov 2026).** Geen data omgezet: er waren nog geen leveringsprojecten. Het oude "Plan met vaste prijs" verdwijnt zodra een project workflows heeft; zonder workflows blijft het staan, zodat niets stil verdwijnt. De definitie van klaar wordt afgeleid (geen aparte kolom `dod`). Workflows hangen aan hun processen via `ngs_audit_processen.workflow_id` (geen `proces_ids`).
 - **Fase 3: af en live (28 nov 2026).** Geen data omgezet: er waren nog geen rapporten.
