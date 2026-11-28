@@ -57,6 +57,7 @@ export function SectieDiensten() {
   const merkVan = (b: BedrijfRij) => ({
     naam: b.naam, handelsnaam: b.handelsnaam ?? '', kort: b.kort ?? '', kleur: b.kleur ?? '#111111',
     website: b.website ?? '', email: b.email ?? '', antwoord_email: b.antwoord_email ?? '', voettekst: b.voettekst ?? '',
+    betaaltermijn_dagen: b.betaaltermijn_dagen === null || b.betaaltermijn_dagen === undefined ? '' : String(b.betaaltermijn_dagen),
   })
 
   const laad = useCallback(async () => {
@@ -222,6 +223,7 @@ export function SectieDiensten() {
               <Veld key={k} label={l}><input className={INP} value={merk.v[k] ?? ''} onChange={(e) => setMerk((m) => (m ? { ...m, v: { ...m.v, [k]: e.target.value } } : m))} /></Veld>
             ))}
             <Veld label="Kleur"><input type="color" className="h-9 w-16 rounded-lg border border-gray-200" value={merk.v.kleur} onChange={(e) => setMerk((m) => (m ? { ...m, v: { ...m.v, kleur: e.target.value } } : m))} /></Veld>
+            <Veld label="Betaaltermijn (dagen)"><input className={INP} inputMode="numeric" value={merk.v.betaaltermijn_dagen} onChange={(e) => setMerk((m) => (m ? { ...m, v: { ...m.v, betaaltermijn_dagen: e.target.value } } : m))} placeholder="leeg = algemene instelling" /></Veld>
             <Veld label="Voettekst onderaan elke mail" breed><textarea className={INP} rows={2} value={merk.v.voettekst} onChange={(e) => setMerk((m) => (m ? { ...m, v: { ...m.v, voettekst: e.target.value } } : m))} /></Veld>
           </div>
           <div className="flex justify-end gap-2 pt-5">

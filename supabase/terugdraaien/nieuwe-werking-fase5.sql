@@ -1,0 +1,6 @@
+-- Terugdraaien nieuwe werking fase 5 (28 nov 2026). Enkel uitvoeren als het echt moet.
+-- Betaaltermijn van Solutions terug naar de algemene instelling:
+-- UPDATE bedrijven SET betaaltermijn_dagen = NULL WHERE slug = 'nextgensolutions';
+-- Facturen die uit een audit of workflow kwamen, herken je aan voorstel_sleutel 'ngs-audit:%' en 'ngs-workflow:%'.
+-- Nooit wissen: een factuur die nog niet verstuurd is, zet je in Facturen op geannuleerd.
+-- De koppelingen (audit_factuur_id, factuur_id, verrekend_bedrag) mogen blijven staan.

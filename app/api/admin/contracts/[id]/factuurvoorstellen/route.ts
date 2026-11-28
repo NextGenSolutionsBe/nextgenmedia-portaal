@@ -5,6 +5,7 @@ import { magIk } from '@/lib/instellingen/laden'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { safeMessage } from '@/lib/api-error'
 import { inclFromExcl } from '@/lib/invoices'
+import { betaaltermijnVan } from '@/lib/bedrijven/betaaltermijn-server'
 import { SERVICE_LABELS } from '@/lib/utils'
 import { laadAflettering } from '@/lib/contracten/aflettering-server'
 import { isActiefItem } from '@/lib/contracten/aflettering'
@@ -99,7 +100,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!actor) return NextResponse.json({ error: 'Je hebt geen recht om facturen aan een contract toe te voegen.' }, { status: 403 })
     const admin = createAdminSupabaseClient() as unknown as Admin
     const b = await req.json().catch(() => ({})) as Record<string, unknown>
-    const { data: c } = await admin.from('contracts').select('id, title, client_id, service_slug, pdf_path').eq('id', id).maybeSingle()
+    const { data: c } = await admin.from('contracts').select('id, title, client_id, service_slug, pdf_path, bedrijf').eq('id', id).maybeSingle()
     if (!c) return NextResponse.json({ error: 'Contract niet gevonden' }, { status: 404 })
 
     if (b.action === 'ai') {
@@ -114,7 +115,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (!c.client_id) return NextResponse.json({ error: 'Koppel eerst een klant aan het contract.' }, { status: 400 })
       const lijst = Array.isArray(b.voorstellen) ? (b.voorstellen as Record<string, unknown>[]).slice(0, 120) : []
       if (!lijst.length) return NextResponse.json({ error: 'Selecteer minstens één voorstel.' }, { status: 400 })
-      const termijn = Number.isFinite(Number(b.betaaltermijn)) ? Math.max(0, Math.min(365, Math.round(Number(b.betaaltermijn)))) : 30
+      const termijn = b.betaaltermijn !== undefined && b.betaaltermijn !== null && b.betaaltermijn !== '' && Number.isFinite(Number(b.betaaltermijn)) ? Math.max(0, Math.min(365, Math.round(Number(b.betaaltermijn)))) : await betaaltermijnVan(admin, (c as { bedrijf?: string | null }).bedrijf ?? null)
       const bestaand = await bestaandePeriodes(admin, id)
       const aangemaakt: string[] = []; const overgeslagen: { periode: string; reden: string }[] = []
       for (const v of lijst) {

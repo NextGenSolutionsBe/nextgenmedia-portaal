@@ -10,6 +10,7 @@
  *    op een kopie, die de nieuwe getekende versie wordt (nieuwe archiefversie).
  */
 
+import { BEDRIJF } from '@/lib/offerte-afzender'
 import { canonicalStatus } from '@/lib/contract-status'
 
 /** x en y in % vanaf linksboven, breedte en hoogte in PDF-punten (zoals de zone van de klant). */
@@ -87,6 +88,16 @@ export const bedrijfVoorMerk = (merk: string | null | undefined): string =>
     : merk === 'foundersofflanders' ? 'Founders of Flanders'
     : merk === 'algemeen' ? 'NextGen Agency BV'
     : 'NextGenMedia'
+
+/**
+ * Namens wie we tekenen (nieuwe werking fase 5, enkel nieuwe handtekeningen):
+ * altijd de vennootschap, met de handelsnaam van het contract erbij,
+ * bv. "NextGen Agency BV, handelsnaam NextGenSolutions". Wat al getekend is, blijft zoals het was.
+ */
+export function namensVoor(merk: string | null | undefined, vennootschap = BEDRIJF.vennootschap): string {
+  const h = bedrijfVoorMerk(merk)
+  return h === vennootschap ? h : `${vennootschap}, handelsnaam ${h}`
+}
 
 /** Een naam voor onder de handtekening: opgekuist, 2 tot 80 tekens. */
 export function controleerNaam(v: unknown): string | null {

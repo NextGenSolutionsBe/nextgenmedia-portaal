@@ -20,6 +20,8 @@ export type BedrijfRij = {
   email?: string | null
   antwoord_email?: string | null
   voettekst?: string | null
+  /** Betaaltermijn in dagen voor offertes en facturen van dit bedrijf; leeg = de algemene instelling (nieuwe werking fase 5). */
+  betaaltermijn_dagen?: number | null
 }
 
 export type Eenheid = 'eenmalig' | 'maand' | 'uur'
@@ -131,7 +133,7 @@ export function boom(c: Catalogus, ookInactief = false): { bedrijf: BedrijfRij; 
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
-export type BedrijfInvoer = { naam?: unknown; handelsnaam?: unknown; kort?: unknown; kleur?: unknown; website?: unknown; email?: unknown; antwoord_email?: unknown; voettekst?: unknown }
+export type BedrijfInvoer = { naam?: unknown; handelsnaam?: unknown; kort?: unknown; kleur?: unknown; website?: unknown; email?: unknown; antwoord_email?: unknown; voettekst?: unknown; betaaltermijn_dagen?: unknown }
 
 /** Merkgegevens nakijken. De slug verandert nooit; enkel wat op documenten en mails komt. */
 export function controleerBedrijf(invoer: BedrijfInvoer): { ok: true; waarde: Omit<BedrijfRij, 'slug' | 'volgorde' | 'actief'> } | { ok: false; fout: string } {
@@ -144,12 +146,21 @@ export function controleerBedrijf(invoer: BedrijfInvoer): { ok: true; waarde: Om
   if (antwoord && !EMAIL_RE.test(antwoord)) return { ok: false, fout: 'Het antwoordadres klopt niet.' }
   const kleur = typeof invoer.kleur === 'string' && /^#[0-9a-fA-F]{6}$/.test(invoer.kleur) ? invoer.kleur : null
   const website = t(invoer.website, 120).replace(/^https?:\/\//, '').replace(/\/$/, '')
+  // Enkel als het veld meekomt (anders blijft de termijn zoals hij was). Leeg = de algemene instelling.
+  let termijn: { betaaltermijn_dagen?: number | null } = {}
+  if ('betaaltermijn_dagen' in invoer) {
+    const ruw = String(invoer.betaaltermijn_dagen ?? '').trim()
+    const n = Number(ruw)
+    if (ruw && (!Number.isInteger(n) || n < 0 || n > 365)) return { ok: false, fout: 'De betaaltermijn is een aantal dagen tussen 0 en 365, of leeg.' }
+    termijn = { betaaltermijn_dagen: ruw ? n : null }
+  }
   return {
     ok: true,
     waarde: {
       naam, handelsnaam: t(invoer.handelsnaam, 80) || null, kort: t(invoer.kort, 30) || null, kleur,
       website: website || null, email: email || null, antwoord_email: antwoord || null,
       voettekst: String(invoer.voettekst ?? '').trim().slice(0, 500) || null,
+      ...termijn,
     },
   }
 }

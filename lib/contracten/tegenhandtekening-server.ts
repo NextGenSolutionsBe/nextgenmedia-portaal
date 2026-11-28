@@ -10,7 +10,7 @@ import { taakVoorWie, werkdagenLater } from '@/lib/opdrachten-offerte-model'
 import { leadTaakOpties, maakOpdrachtTaak, taakAfvinken } from '@/lib/sales/lead-taken-server'
 import { stempelTegenhandtekening } from './tegenhandtekening-pdf'
 import {
-  datumRegel, bedrijfVoorMerk, controleerNaam, leesHandtekening, moetTegentekenen, redenNietTegentekenen,
+  datumRegel, namensVoor, controleerNaam, leesHandtekening, moetTegentekenen, redenNietTegentekenen,
   tegentekenTaak, zoneKolommen, type OnsZone,
 } from './tegenhandtekening'
 
@@ -71,7 +71,7 @@ export async function tegenteken(admin: Admin, contractId: string, inv: Tegentek
   const png = Buffer.from(hand.base64, 'base64')
   const kaart = await kaartVan(admin, contractId)
   // Het bedrijf van het contract zelf (verbeterplan fase 1) gaat voor; anders het merk van de projectkaart.
-  const bedrijf = bedrijfVoorMerk((c.bedrijf as string | null | undefined) ?? kaart?.merk)
+  const bedrijf = namensVoor((c.bedrijf as string | null | undefined) ?? kaart?.merk)
   const op = new Date().toISOString()
   let gestempeld: { bytes: Uint8Array; zone: OnsZone }
   try {

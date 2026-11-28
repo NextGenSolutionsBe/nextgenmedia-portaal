@@ -1,4 +1,5 @@
 import 'server-only'
+import { betaaltermijn } from '@/lib/ngs/facturatie'
 import { randomUUID } from 'node:crypto'
 import { MERK_STIJL, mailMerkVan, type MailMerk } from '@/lib/merk-mail'
 import { OFFERTE_BUCKET, type Offerte } from '@/lib/offertes'
@@ -105,10 +106,18 @@ export type PdfVraag = {
 }
 
 export async function bouwOffertePdf(admin: Admin, v: PdfVraag): Promise<Uint8Array> {
-  const [c, oi] = await Promise.all([contactMetFoto(admin, v.verantwoordelijke), offerteInstellingen(admin)])
+  const [c, oi, b] = await Promise.all([
+    contactMetFoto(admin, v.verantwoordelijke), offerteInstellingen(admin),
+    admin.from('bedrijven').select('betaaltermijn_dagen, handelsnaam').eq('slug', v.merk).maybeSingle(),
+  ])
+  const bd = b.data as { betaaltermijn_dagen?: number | null; handelsnaam?: string | null } | null
+  // De betaaltermijn van het bedrijf (Instellingen → Diensten → Bedrijven), anders die van de offertes (nieuwe werking fase 5).
+  const termijn = betaaltermijn(bd?.betaaltermijn_dagen ?? null, oi.betalingstermijn)
+  // De handelsnaam van het bedrijf van de offerte ("NextGen Agency BV, handelsnaam NextGenSolutions").
+  const bedrijf = { ...offerteBedrijf(MERK_STIJL[v.merk]), ...(bd?.handelsnaam?.trim() ? { handelsnaam: bd.handelsnaam.trim() } : {}) }
   return maakOffertePdf({
-    merk: v.merk, bedrijf: offerteBedrijf(MERK_STIJL[v.merk]), contact: c.contact, foto: c.foto,
-    betalingstermijn: oi.betalingstermijn, klant: v.klant, inhoud: v.inhoud, nummer: v.nummer,
+    merk: v.merk, bedrijf, contact: c.contact, foto: c.foto,
+    betalingstermijn: termijn, klant: v.klant, inhoud: v.inhoud, nummer: v.nummer,
     handtekening: v.handtekening ?? null, akkoord: v.akkoord ?? null, voorbeeld: v.voorbeeld,
   })
 }

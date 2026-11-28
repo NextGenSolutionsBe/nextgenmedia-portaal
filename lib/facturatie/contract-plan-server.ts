@@ -1,6 +1,7 @@
 import 'server-only'
 import { revalidatePath } from 'next/cache'
 import { inclFromExcl } from '@/lib/invoices'
+import { betaaltermijnVan } from '@/lib/bedrijven/betaaltermijn-server'
 import { logAudit } from '@/lib/audit'
 import { logContractEvent } from '@/lib/contract-audit'
 import { canonicalStatus } from '@/lib/contract-status'
@@ -149,7 +150,8 @@ export async function planFacturenUitContract(admin: Admin, contractId: string, 
  */
 async function bewaarFacturen(admin: Admin, contract: Record<string, unknown>, clientId: string, facturen: PlanFactuur[], opties: { door?: string | null; userId?: string | null; note: string; bron: string }): Promise<string[]> {
   const contractId = String(contract.id)
-  const termijn = 30
+  // Betaaltermijn van het bedrijf van het contract, anders de algemene (nieuwe werking fase 5).
+  const termijn = await betaaltermijnVan(admin, typeof contract.bedrijf === 'string' ? contract.bedrijf : null)
   const bestelbon = typeof contract.bestelbon_nummer === 'string' && contract.bestelbon_nummer.trim() ? contract.bestelbon_nummer.trim() : null
   const ids: string[] = []
   for (const f of facturen) {

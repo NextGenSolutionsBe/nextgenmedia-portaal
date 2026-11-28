@@ -1,4 +1,5 @@
 import { leesGetal } from '@/lib/getal'
+import { betaaltermijnVan } from '@/lib/bedrijven/betaaltermijn-server'
 import { isFactuurType } from '@/lib/facturatie/item-model'
 import { safeMessage } from '@/lib/api-error'
 import { isDienst } from '@/lib/omzet/diensten'
@@ -324,7 +325,8 @@ export async function POST(req: NextRequest) {
         if (bestaand?.invoice_id) return NextResponse.json({ error: 'Voor deze maand bestaat al een eigen item. Open dat item om het aan te passen.' }, { status: 409 })
         if (bestaand && ['verstuurd', 'betaald'].includes(String(bestaand.status))) return NextResponse.json({ error: 'Deze maand is al gefactureerd.' }, { status: 409 })
       }
-      if (b.contract_id) { const { data: c } = await admin.from('contracts').select('id').eq('id', String(b.contract_id)).maybeSingle(); if (!c) return NextResponse.json({ error: 'Contract niet gevonden.' }, { status: 400 }) }
+      let contractBedrijf: string | null = null
+      if (b.contract_id) { const { data: c } = await admin.from('contracts').select('id, bedrijf').eq('id', String(b.contract_id)).maybeSingle(); if (!c) return NextResponse.json({ error: 'Contract niet gevonden.' }, { status: 400 }); contractBedrijf = (c as { bedrijf?: string | null }).bedrijf ?? null }
       // Dezelfde opslagactie (dubbelklik, netwerk dat opnieuw probeert) wordt nooit twee keer verwerkt.
       const aanmaakSleutel = typeof b.aanmaak_sleutel === 'string' && /^[0-9a-zA-Z-]{8,64}$/.test(b.aanmaak_sleutel) ? `aanmaak:${b.aanmaak_sleutel}` : null
       if (aanmaakSleutel) {
@@ -332,7 +334,9 @@ export async function POST(req: NextRequest) {
         if (al) return NextResponse.json({ id: al.id, invoice_date: al.invoice_date, status: al.status, al_opgeslagen: true })
       }
       const month = invoiceDate.slice(0, 7)
-      const termijn = b.payment_term_days != null && Number.isFinite(Number(b.payment_term_days)) ? Math.max(0, Math.round(Number(b.payment_term_days))) : 30
+      // Zonder eigen termijn: die van het bedrijf (factuur of contract), anders de algemene uit Instellingen (nieuwe werking fase 5).
+      const termijn = b.payment_term_days != null && Number.isFinite(Number(b.payment_term_days)) ? Math.max(0, Math.round(Number(b.payment_term_days)))
+        : await betaaltermijnVan(admin, typeof b.bedrijf === 'string' && b.bedrijf ? b.bedrijf : contractBedrijf)
       const vervaldatum = typeof b.due_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.due_date) ? b.due_date : (() => { const d = new Date(invoiceDate + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + termijn); return d.toISOString().slice(0, 10) })()
       const revenueId = b.revenue_id || await linkOrCreateForecast(admin, { client_id: b.client_id || null, service_slug: b.service_slug || null, month, amount_excl: t.excl, description: b.description || null, recurring: false })
       const id = await safeInsertId(admin, 'invoices', {

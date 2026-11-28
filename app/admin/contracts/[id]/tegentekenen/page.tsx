@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { ChevronLeft, CheckCircle2 } from 'lucide-react'
 import { createAdminSupabaseClient, requireAdmin, trySignedUrl } from '@/lib/supabase/server'
 import { leesProfiel } from '@/lib/account-server'
-import { KLANT_TEKENDE_IN_APP, bedrijfVoorMerk, onsZoneVan, redenNietTegentekenen, volgendeInLijst } from '@/lib/contracten/tegenhandtekening'
+import { KLANT_TEKENDE_IN_APP, namensVoor, onsZoneVan, redenNietTegentekenen, volgendeInLijst } from '@/lib/contracten/tegenhandtekening'
 import { formatDate } from '@/lib/utils'
 import { hoortBij } from '@/lib/te-tekenen'
 import { TegentekenScherm } from './tegenteken-scherm'
@@ -87,7 +87,7 @@ export default async function TegentekenenPagina({ params, searchParams }: { par
         qs={qs}
         aantalOpen={open.length}
         positie={Math.max(1, open.indexOf(c.id) + 1)}
-        bedrijf={bedrijfVoorMerk((kaart as { merk?: string | null } | null)?.merk)}
+        bedrijf={namensVoor((c as { bedrijf?: string | null }).bedrijf ?? (kaart as { merk?: string | null } | null)?.merk)}
         klant={{ naam: c.signer_name ?? klantNaam, op: c.signed_at ?? null, manueel: c.ondertekening_wijze === 'manueel' }}
       />
     </div>
