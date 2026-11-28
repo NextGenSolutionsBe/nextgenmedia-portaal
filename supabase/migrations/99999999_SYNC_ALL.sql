@@ -9291,3 +9291,28 @@ CREATE TABLE IF NOT EXISTS ngs_audit_processen (
 CREATE INDEX IF NOT EXISTS ngs_audit_processen_deal_idx ON ngs_audit_processen (deal_id) WHERE verwijderd_op IS NULL;
 ALTER TABLE ngs_audit_processen ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ngs_user_stories ADD COLUMN IF NOT EXISTS workflow_id uuid REFERENCES ngs_workflows(id) ON DELETE SET NULL;
+
+-- ═══ Nieuwe werking fase 4 (28 nov 2026): levering per workflow. Additief. ═══
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS fase text NOT NULL DEFAULT 'gepland';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ngs_workflows_fase_check') THEN
+    ALTER TABLE ngs_workflows ADD CONSTRAINT ngs_workflows_fase_check CHECK (fase IN ('gepland','bouw','oplevering','nazorg','klaar'));
+  END IF;
+END $$;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS fase_sinds timestamptz;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS bouw_start timestamptz;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS wacht_op_klant boolean NOT NULL DEFAULT false;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS wacht_reden text;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS wacht_sinds timestamptz;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS wacht_dagen integer NOT NULL DEFAULT 0;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS opname_link text;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS video_link text;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS video_gestuurd_op timestamptz;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS video_email_id uuid;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS oplevering_op timestamptz;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS nazorg_start timestamptz;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS nazorg_calls jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS klaar_op timestamptz;
+ALTER TABLE ngs_workflows ADD COLUMN IF NOT EXISTS verantwoordelijke text;
+ALTER TABLE klant_meetings ADD COLUMN IF NOT EXISTS ngs_workflow_id uuid REFERENCES ngs_workflows(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS klant_meetings_ngs_workflow_idx ON klant_meetings (ngs_workflow_id) WHERE ngs_workflow_id IS NOT NULL;

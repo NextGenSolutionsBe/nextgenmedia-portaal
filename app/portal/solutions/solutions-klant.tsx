@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { CheckCircle2, Loader2, ShieldCheck, Circle } from 'lucide-react'
+import { CheckCircle2, Loader2, ShieldCheck, Circle, PlayCircle } from 'lucide-react'
 import { PROJECT_FASES, KLANT_FASE_UITLEG, KLANT_STORY_STATUS } from '@/lib/ngs/levering'
 import type { KlantProject, KlantCare } from '@/lib/ngs/levering-server'
 
@@ -65,6 +65,24 @@ function ProjectKaart({ p, magGoedkeuren }: { p: KlantProject; magGoedkeuren: bo
         ))}
       </ol>
       {p.doel && <p className="text-sm"><span className="text-gray-500">Doel: </span>{p.doel}</p>}
+
+      {p.workflows.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">Per onderdeel</h3>
+          <ul className="space-y-2">
+            {p.workflows.map((w) => (
+              <li key={w.id} className="rounded-xl border border-gray-200 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="font-medium text-sm min-w-0">{w.naam}</p>
+                  <span className={`text-[11px] rounded-full border px-2 py-0.5 shrink-0 ${w.fase === 'klaar' ? 'border-green-200 text-green-800 bg-green-50' : 'border-gray-200 text-gray-600'}`}>{w.faseLabel}</span>
+                </div>
+                <p className={`text-sm mt-1 ${w.wachtOpJou ? 'text-amber-900' : 'text-gray-600'}`}>{w.uitleg}</p>
+                {w.video && <a href={w.video} target="_blank" rel="noopener noreferrer" className="mt-1.5 inline-flex items-center gap-1 text-sm font-medium underline" style={{ color: BLAUW }}><PlayCircle className="h-4 w-4" />Video: zo werkt het</a>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {p.stories === null ? (
         <p className="text-sm text-gray-500">We werken uit wat de oplossing precies moet kunnen. Zodra dat klaar is, zie je het hier en keur je het goed.</p>

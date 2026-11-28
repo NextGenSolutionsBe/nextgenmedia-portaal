@@ -109,6 +109,8 @@ export type UserStory = {
   klant_akkoord_op: string | null
   klant_akkoord_door: string | null
   volgorde: number
+  /** De workflow uit het auditrapport waar deze story bij hoort (nieuwe werking fase 4). */
+  workflow_id?: string | null
 }
 
 const regels = (v: unknown, max = 30): string[] =>
@@ -190,12 +192,13 @@ export type ProjectStand = {
 }
 
 /** Waarom kan een project (nog) niet naar die fase? Null = het mag. Terug kan altijd. */
-export function waaromNietNaar(p: ProjectStand, naar: ProjectFase, stories: Pick<UserStory, 'status' | 'dod' | 'acceptatiecriteria'>[]): string | null {
+export function waaromNietNaar(p: ProjectStand, naar: ProjectFase, stories: Pick<UserStory, 'status' | 'dod' | 'acceptatiecriteria'>[], metWorkflows = false): string | null {
   const volgorde = PROJECT_FASES.map((f) => f.key) as string[]
   if (volgorde.indexOf(naar) <= volgorde.indexOf(p.fase)) return null
   if (naar !== 'briefing' && !p.briefing_bevestigd_op) return 'Bevestig eerst de briefing: zonder briefing geen user stories.'
   if (['akkoord', 'bouw', 'review', 'klaar', 'care'].includes(naar) && !stories.some((s) => s.status !== 'voorstel')) return 'Keur eerst minstens één user story goed.'
-  if (['bouw', 'review', 'klaar', 'care'].includes(naar) && !p.plan_goedgekeurd_op) return 'Het plan met de vaste prijs is nog niet goedgekeurd door de klant.'
+  // Met workflows uit het auditrapport (fase 4) ligt de vaste prijs al vast in het rapport.
+  if (['bouw', 'review', 'klaar', 'care'].includes(naar) && !p.plan_goedgekeurd_op && !metWorkflows) return 'Het plan met de vaste prijs is nog niet goedgekeurd door de klant.'
   if (['klaar', 'care'].includes(naar)) {
     const open = stories.filter((s) => s.status !== 'voorstel' && s.status !== 'klaar')
     if (open.length) return `Nog ${open.length} user ${open.length === 1 ? 'story' : 'stories'} niet klaar.`

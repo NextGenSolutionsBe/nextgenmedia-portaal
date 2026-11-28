@@ -52,6 +52,7 @@ function naarStory(r: Record<string, unknown>): UserStory {
     acceptatiecriteria: Array.isArray(r.acceptatiecriteria) ? (r.acceptatiecriteria as string[]) : [], schatting_uren: getal(r.schatting_uren), bestede_uren: Number(r.bestede_uren ?? 0),
     status: isStoryStatus(r.status) ? r.status : 'voorstel', dod: netteDod(r.dod), klant_akkoord_op: (r.klant_akkoord_op as string | null) ?? null,
     klant_akkoord_door: (r.klant_akkoord_door as string | null) ?? null, volgorde: Number(r.volgorde ?? 0),
+    workflow_id: (r.workflow_id as string | null) ?? null,
   }
 }
 function naarCare(r: Record<string, unknown>): CareItem {
@@ -222,7 +223,8 @@ export async function naarFase(admin: Admin, idIn: unknown, naarIn: unknown, doo
   if (!isProjectFase(naarIn)) throw new LeveringFout('Onbekende fase.')
   if (naarIn === p.fase) return
   const { stories } = await projectDetail(admin, p.id)
-  const fout = waaromNietNaar(p, naarIn, stories)
+  const { count } = await admin.from('ngs_workflows').select('id', { count: 'exact', head: true }).eq('project_id', p.id).is('verwijderd_op', null)
+  const fout = waaromNietNaar(p, naarIn, stories, (count ?? 0) > 0)
   if (fout) throw new LeveringFout(fout)
   await zetProject(admin, p.id, { fase: naarIn, fase_sinds: nu() })
   await tijdlijn(admin, p.deal_id, `Levering: ${projectFaseLabel(p.fase)} → ${projectFaseLabel(naarIn)}`, door)
@@ -293,6 +295,14 @@ export async function wijzigStory(admin: Admin, projectIdIn: unknown, idIn: unkn
     const u = Number(String(b.bestede_uren).replace(',', '.'))
     if (!Number.isFinite(u) || u < 0 || u > 5000) throw new LeveringFout('Bestede uren: een getal.')
     patch.bestede_uren = Math.round(u * 4) / 4
+  }
+  if ('workflow_id' in b) {
+    if (b.workflow_id === null || b.workflow_id === '') patch.workflow_id = null
+    else {
+      const { data: w } = await admin.from('ngs_workflows').select('id').eq('id', moetId(b.workflow_id, 'Workflow')).eq('project_id', p.id).is('verwijderd_op', null).maybeSingle()
+      if (!w) throw new LeveringFout('Die workflow hoort niet bij dit project.')
+      patch.workflow_id = (w as { id: string }).id
+    }
   }
   if ('klant_akkoord' in b) { patch.klant_akkoord_op = b.klant_akkoord === true ? nu() : null; patch.klant_akkoord_door = b.klant_akkoord === true ? door : null }
   const { error } = await admin.from('ngs_user_stories').update(patch).eq('id', s.id)
@@ -425,6 +435,8 @@ export type KlantProject = {
   id: string; titel: string; fase: ProjectFase; fase_sinds: string
   doel: string | null; prijs: number | null; plan_goedgekeurd_op: string | null
   stories: KlantStory[] | null
+  /** Per workflow de fase met een korte uitleg (nieuwe werking fase 4). Nooit prijs, uren of wie bouwt. */
+  workflows: import('./workflow-levering').KlantWfLevering[]
 }
 export type KlantCare = Pick<CareItem, 'id' | 'naam' | 'omschrijving' | 'systemen' | 'status' | 'care_contract' | 'laatste_controle'> & { volgende: string | null }
 
@@ -440,6 +452,8 @@ export async function portaalSolutions(admin: Admin, clientIdIn: unknown): Promi
     ? await admin.from('ngs_user_stories').select('*').in('project_id', ids).is('verwijderd_op', null).order('volgorde').order('nummer')
     : { data: [] }
   const stories = ((st ?? []) as Record<string, unknown>[]).map(naarStory)
+  const { klantWorkflows } = await import('./workflow-levering-server')
+  const wf = await klantWorkflows(admin, projecten.map((p) => p.id)).catch(() => ({} as Record<string, import('./workflow-levering').KlantWfLevering[]>))
   const dag = vandaag()
   return {
     projecten: projecten.map((p) => ({
@@ -452,6 +466,7 @@ export async function portaalSolutions(admin: Admin, clientIdIn: unknown): Promi
           status: s.status, klant_akkoord_op: s.klant_akkoord_op, klant_akkoord_door: s.klant_akkoord_door, magGoedkeuren: magKlantGoedkeuren(p.fase, s),
         }))
         : null,
+      workflows: wf[p.id] ?? [],
     })),
     care: ((cr ?? []) as Record<string, unknown>[]).map(naarCare).filter((c) => c.status !== 'gestopt').map((c) => ({
       id: c.id, naam: c.naam, omschrijving: c.omschrijving, systemen: c.systemen, status: c.status, care_contract: c.care_contract,

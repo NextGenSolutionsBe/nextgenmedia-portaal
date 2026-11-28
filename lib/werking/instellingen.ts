@@ -49,6 +49,8 @@ export type WerkingInstellingen = {
     weken: number; uurwaarde: number; min_uren: number; andere_uurprijs: number; afronding: number
     maten: Record<Maat, { van: number; tot: number | null; min: number; max: number | null }>
   }
+  /** Levering per workflow (fase 4): bouwtermijn, nazorg en wie standaard bouwt (voornaam). */
+  levering: { bouw_dagen: number; nazorg_weken: number; nazorg_call_min: number; verantwoordelijke: string }
 }
 
 export const MATEN = [
@@ -72,6 +74,7 @@ export const STANDAARD_WERKING: WerkingInstellingen = {
       groot: { van: 10, tot: null, min: 8400, max: null },
     },
   },
+  levering: { bouw_dagen: 14, nazorg_weken: 2, nazorg_call_min: 30, verantwoordelijke: 'Jonathan' },
 }
 
 // ── Nakijken ────────────────────────────────────────────────────────────────
@@ -100,7 +103,7 @@ export function leesWerking(ruw: unknown): WerkingInstellingen {
   const r = obj(ruw)
   const S = STANDAARD_WERKING
   const dom = obj(r.domeinen), ov = obj(r.weekoverleg), pl = obj(r.planning), vk = obj(r.verkoop), pr = obj(r.prijzen), mt = obj(pr.maten)
-  const V = S.verkoop, P = S.prijzen
+  const V = S.verkoop, P = S.prijzen, L = S.levering, lv = obj(r.levering)
   const maat = (k: Maat) => {
     const x = obj(mt[k]), d = P.maten[k]
     const leegOf = (v: unknown, std: number | null) => (v === null || v === '' ? null : v === undefined ? std : getalOf(v, std ?? 0, 0, 10_000_000))
@@ -132,6 +135,12 @@ export function leesWerking(ruw: unknown): WerkingInstellingen {
       andere_uurprijs: getalOf(pr.andere_uurprijs, P.andere_uurprijs, 1, 10_000),
       afronding: getalOf(pr.afronding, P.afronding, 1, 10_000),
       maten: { klein: maat('klein'), middel: maat('middel'), groot: maat('groot') },
+    },
+    levering: {
+      bouw_dagen: Math.round(getalOf(lv.bouw_dagen, L.bouw_dagen, 1, 120)),
+      nazorg_weken: Math.round(getalOf(lv.nazorg_weken, L.nazorg_weken, 0, 26)),
+      nazorg_call_min: Math.round(getalOf(lv.nazorg_call_min, L.nazorg_call_min, 5, 240)),
+      verantwoordelijke: naamOf(lv.verantwoordelijke, L.verantwoordelijke),
     },
   }
 }

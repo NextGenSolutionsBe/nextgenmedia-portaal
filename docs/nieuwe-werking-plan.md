@@ -4,7 +4,8 @@
 
 ## Voortgang
 
-- **Fase 3: af en live (28 nov 2026).** Geen data omgezet: er waren nog geen rapporten. "Plan met vaste prijs" in het leveringsproject blijft tot fase 4, omdat de stap naar In bouw er nog aan hangt; fase 4 zet de workflows uit het rapport in de plaats.
+- **Fase 4: af en live (28 nov 2026).** Geen data omgezet: er waren nog geen leveringsprojecten. Het oude "Plan met vaste prijs" verdwijnt zodra een project workflows heeft; zonder workflows blijft het staan, zodat niets stil verdwijnt. De definitie van klaar wordt afgeleid (geen aparte kolom `dod`). Workflows hangen aan hun processen via `ngs_audit_processen.workflow_id` (geen `proces_ids`).
+- **Fase 3: af en live (28 nov 2026).** Geen data omgezet: er waren nog geen rapporten.
 - **Fase 2: af en live (28 nov 2026).** Geen data omgezet; de 16 deals bleven in hun fase. De 12 Solutions-kaarten staan op de lijst bovenaan Projecten om te beslissen.
 - **Fase 1: af en live (28 nov 2026).** Yasmine en Jonathan hebben nog geen account; hun profiel en rechten komen vanzelf mee als jullie het account maken met hun sjabloon.
 
