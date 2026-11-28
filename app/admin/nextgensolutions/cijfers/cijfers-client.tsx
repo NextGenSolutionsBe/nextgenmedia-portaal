@@ -14,7 +14,7 @@ import { OmzetGrafiek } from './omzet-grafiek'
  * gewonnen en verloren in de gekozen periode, wat er elke maand binnenkomt
  * en wat er open staat. Per bron en waarom deals niet doorgingen.
  */
-export function CijfersClient({ deals, vandaag, gefactureerd = [] }: { deals: Deal[]; vandaag: string; gefactureerd?: { maand: string; bedrag: number; verstuurd: boolean }[] }) {
+export function CijfersClient({ deals, vandaag, gefactureerd = [], bespaard }: { deals: Deal[]; vandaag: string; gefactureerd?: { maand: string; bedrag: number; verstuurd: boolean }[]; bespaard?: { aantal: number; gemiddeld: number | null } }) {
   const nu = vandaag.slice(0, 7)
   const [soort, setSoort] = useState<PeriodeSoort | 'alles'>('jaar')
   const [periode, setPeriode] = useState(() => periodeVan('jaar', nu))
@@ -61,6 +61,8 @@ export function CijfersClient({ deals, vandaag, gefactureerd = [] }: { deals: De
         <Tegel label="Gemiddelde deal" waarde={c.gemiddeld === null ? '—' : eur(c.gemiddeld)} sub={c.doorlooptijd === null ? 'doorlooptijd —' : `${c.doorlooptijd} dagen tot getekend`} />
         <Tegel label="Per maand (nu)" waarde={eur(mrr)} sub="lopende maandbedragen" />
         <Tegel label="Open pipeline" waarde={eur(c.pipelineWaarde)} sub={`gewogen ${eur(c.gewogen)}`} />
+        {/* Nieuwe werking fase 3: uit onze eigen afgeronde rapporten, voor de verkoop. */}
+        <Tegel label="Bespaard per workflow" waarde={bespaard?.gemiddeld ? `${bespaard.gemiddeld.toLocaleString('nl-BE')} u/week` : '—'} sub={bespaard?.aantal ? `gemiddeld over ${bespaard.aantal} ${bespaard.aantal === 1 ? 'workflow' : 'workflows'}` : 'nog geen afgerond rapport'} />
       </div>
 
       <OmzetGrafiek deals={deals} vandaag={vandaag} />

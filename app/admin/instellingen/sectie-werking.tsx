@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, type ReactNode } from 'react'
-import { DOMEINEN, WERK_SOORTEN, leesWerking, eindUur, auditPrijs, type WerkingInstellingen } from '@/lib/werking/instellingen'
+import { DOMEINEN, WERK_SOORTEN, MATEN, leesWerking, eindUur, auditPrijs, type WerkingInstellingen, type Maat } from '@/lib/werking/instellingen'
 import type { Ctx } from './instellingen-client'
 import { Kop, OpslaanBalk, Groep, Veld, Getal, INP } from './ui'
 
@@ -94,6 +94,32 @@ export function SectieWerking({ ctx }: { ctx: Ctx }) {
           <Naam label="Auditdag ter plaatse" value={v.verkoop.auditdag_door} disabled={uit} onChange={(w) => zet('verkoop', { auditdag_door: w })} />
           <Naam label="Rapport schrijft" value={v.verkoop.rapport_door} disabled={uit} onChange={(w) => zet('verkoop', { rapport_door: w })} />
         </Rij>
+      </Groep>
+
+      <Groep titel="Prijs per workflow (Solutions)">
+        <p className="text-[12px] text-gray-500 -mt-1 mb-2">Bespaarde uren per week × weken × uurwaarde, afgerond. De klant ziet nooit deze getallen, enkel de maat en de vaste prijs.</p>
+        <Rij>
+          <Getal label="Weken" value={v.prijzen.weken} min={1} max={104} onChange={(w) => zet('prijzen', { weken: w })} />
+          <Getal label="Uurwaarde" eenheid="€" value={v.prijzen.uurwaarde} min={1} onChange={(w) => zet('prijzen', { uurwaarde: w })} />
+          <Getal label="Minimum per workflow" eenheid="u/week" value={v.prijzen.min_uren} min={0} onChange={(w) => zet('prijzen', { min_uren: w })} hint="Minder = bundelen met een ander proces." />
+          <Getal label="Afronden op" eenheid="€" value={v.prijzen.afronding} min={1} onChange={(w) => zet('prijzen', { afronding: w })} />
+          <Getal label="Andere waarde: uurprijs" eenheid="€" value={v.prijzen.andere_uurprijs} min={1} onChange={(w) => zet('prijzen', { andere_uurprijs: w })} hint="Projecten zonder tijdswinst: geschatte uren × deze prijs." />
+        </Rij>
+        <div className="mt-3 space-y-2">
+          {MATEN.map((m) => {
+            const x = v.prijzen.maten[m.key as Maat]
+            const zetMaat = (p: Partial<typeof x>) => zet('prijzen', { maten: { ...v.prijzen.maten, [m.key]: { ...x, ...p } } })
+            return (
+              <div key={m.key} className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-end">
+                <div className="text-sm font-medium pb-2 col-span-2 sm:col-span-1">{m.label}</div>
+                <Getal label="Van (u/week)" value={x.van} min={0} onChange={(w) => zetMaat({ van: w })} />
+                <Getal label="Tot (u/week)" value={x.tot ?? NaN} min={0} onChange={(w) => zetMaat({ tot: Number.isFinite(w) ? w : null })} hint={x.tot === null ? 'leeg = en meer' : undefined} />
+                <Getal label="Prijs vanaf" eenheid="€" value={x.min} min={0} onChange={(w) => zetMaat({ min: w })} />
+                <Getal label="Prijs tot" eenheid="€" value={x.max ?? NaN} min={0} onChange={(w) => zetMaat({ max: Number.isFinite(w) ? w : null })} hint={x.max === null ? 'leeg = geen maximum' : undefined} />
+              </div>
+            )
+          })}
+        </div>
       </Groep>
       </div>
 

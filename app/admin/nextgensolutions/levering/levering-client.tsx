@@ -6,6 +6,7 @@ import { AlertTriangle } from 'lucide-react'
 import { PROJECT_FASES, type ProjectFase } from '@/lib/ngs/levering'
 import type { LeveringData } from '@/lib/ngs/levering-server'
 import { Kop } from '../ui'
+import { AuditsLijst } from './audits'
 import { ProjectVenster } from './project-venster'
 import { CareLijst } from './care'
 
@@ -13,7 +14,7 @@ import { CareLijst } from './care'
  * Levering van NextGenSolutions: elk gewonnen project per fase (Briefing tot
  * Care) en het Care-register. Een project start vanuit de deal (Closed Won).
  */
-export function LeveringClient({ begin, openProject, tab: beginTab, verkoop = true }: { begin: LeveringData; openProject: string | null; tab: 'projecten' | 'care'; verkoop?: boolean }) {
+export function LeveringClient({ begin, openProject, tab: beginTab, verkoop = true }: { begin: LeveringData; openProject: string | null; tab: 'projecten' | 'care' | 'audits'; verkoop?: boolean }) {
   const router = useRouter()
   const [data, setData] = useState(begin)
   const [tab, setTab] = useState(beginTab)
@@ -36,11 +37,12 @@ export function LeveringClient({ begin, openProject, tab: beginTab, verkoop = tr
       <Kop actief="levering" titel="Levering" sub="Van briefing tot Care, per gewonnen project." tabs={verkoop ? undefined : ['levering']} />
       {!data.klaar && <div className="card-base text-sm text-gray-600">De levering is er pas na de update van de databank.</div>}
       <div className="inline-flex rounded-full p-1 bg-gray-100" role="tablist">
-        {([['projecten', `Projecten (${data.projecten.length})`], ['care', `Care (${data.care.length})${teLaatCare ? ` · ${teLaatCare} te laat` : ''}`]] as const).map(([k, l]) => (
+        {([['projecten', `Projecten (${data.projecten.length})`], ['audits', 'Audits'], ['care', `Care (${data.care.length})${teLaatCare ? ` · ${teLaatCare} te laat` : ''}`]] as const).map(([k, l]) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`text-sm px-3.5 py-1.5 rounded-full ${tab === k ? 'bg-white shadow-sm font-semibold text-gray-900' : 'text-gray-600'}`}>{l}</button>
         ))}
       </div>
 
+      {tab === 'audits' && <AuditsLijst />}
       {tab === 'projecten' && (
         data.projecten.length === 0 ? (
           <div className="card-base text-sm text-gray-500 text-center py-10">Nog geen projecten. Open een deal in Closed Won en kies <b>Leveringsproject starten</b>.</div>

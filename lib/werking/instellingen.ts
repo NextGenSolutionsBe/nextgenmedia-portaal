@@ -44,13 +44,34 @@ export type WerkingInstellingen = {
     /** Wie de auditdag doet en wie het rapport schrijft (voornaam). */
     auditdag_door: string; rapport_door: string
   }
+  /** Prijs per workflow (fase 3): waarde voor de klant, nooit uren × tarief. De klant ziet nooit deze getallen. */
+  prijzen: {
+    weken: number; uurwaarde: number; min_uren: number; andere_uurprijs: number; afronding: number
+    maten: Record<Maat, { van: number; tot: number | null; min: number; max: number | null }>
+  }
 }
+
+export const MATEN = [
+  { key: 'klein', label: 'Klein' },
+  { key: 'middel', label: 'Middel' },
+  { key: 'groot', label: 'Groot' },
+] as const
+export type Maat = (typeof MATEN)[number]['key']
+export const maatLabel = (m: string | null | undefined) => MATEN.find((x) => x.key === m)?.label ?? null
 
 export const STANDAARD_WERKING: WerkingInstellingen = {
   domeinen: { solutions: 'Marco', media: 'Chiara', financien_legal: 'Bram', interne_werking: 'Marco' },
   weekoverleg: { dag: 5, van: '16:00', duur_min: 30, reeks_id: null },
   planning: { management: 'Chiara', uitvoering: 'Yasmine', shoot: 'Bram' },
   verkoop: { audit_basis: 450, audit_per_proces: 295, max_processen: 5, opvolg_dagen: 7, presentatie_max_dagen: 7, presentatie_min_per_proces: 10, auditdag_door: 'Marco', rapport_door: 'Jonathan' },
+  prijzen: {
+    weken: 24, uurwaarde: 35, min_uren: 3, andere_uurprijs: 125, afronding: 50,
+    maten: {
+      klein: { van: 3, tot: 5, min: 2500, max: 4200 },
+      middel: { van: 5, tot: 10, min: 4200, max: 8400 },
+      groot: { van: 10, tot: null, min: 8400, max: null },
+    },
+  },
 }
 
 // ── Nakijken ────────────────────────────────────────────────────────────────
@@ -78,8 +99,13 @@ const UUID = /^[0-9a-f-]{36}$/i
 export function leesWerking(ruw: unknown): WerkingInstellingen {
   const r = obj(ruw)
   const S = STANDAARD_WERKING
-  const dom = obj(r.domeinen), ov = obj(r.weekoverleg), pl = obj(r.planning), vk = obj(r.verkoop)
-  const V = S.verkoop
+  const dom = obj(r.domeinen), ov = obj(r.weekoverleg), pl = obj(r.planning), vk = obj(r.verkoop), pr = obj(r.prijzen), mt = obj(pr.maten)
+  const V = S.verkoop, P = S.prijzen
+  const maat = (k: Maat) => {
+    const x = obj(mt[k]), d = P.maten[k]
+    const leegOf = (v: unknown, std: number | null) => (v === null || v === '' ? null : v === undefined ? std : getalOf(v, std ?? 0, 0, 10_000_000))
+    return { van: getalOf(x.van, d.van, 0, 200), tot: leegOf(x.tot, d.tot), min: getalOf(x.min, d.min, 0, 10_000_000), max: leegOf(x.max, d.max) }
+  }
   return {
     domeinen: Object.fromEntries(DOMEINEN.map((d) => [d.key, naamOf(dom[d.key], S.domeinen[d.key])])) as Record<Domein, string>,
     weekoverleg: {
@@ -98,6 +124,14 @@ export function leesWerking(ruw: unknown): WerkingInstellingen {
       presentatie_min_per_proces: Math.round(getalOf(vk.presentatie_min_per_proces, V.presentatie_min_per_proces, 1, 120)),
       auditdag_door: naamOf(vk.auditdag_door, V.auditdag_door),
       rapport_door: naamOf(vk.rapport_door, V.rapport_door),
+    },
+    prijzen: {
+      weken: getalOf(pr.weken, P.weken, 1, 104),
+      uurwaarde: getalOf(pr.uurwaarde, P.uurwaarde, 1, 1000),
+      min_uren: getalOf(pr.min_uren, P.min_uren, 0, 100),
+      andere_uurprijs: getalOf(pr.andere_uurprijs, P.andere_uurprijs, 1, 10_000),
+      afronding: getalOf(pr.afronding, P.afronding, 1, 10_000),
+      maten: { klein: maat('klein'), middel: maat('middel'), groot: maat('groot') },
     },
   }
 }
