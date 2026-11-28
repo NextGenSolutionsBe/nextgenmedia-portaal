@@ -151,6 +151,14 @@ export async function POST(req: NextRequest) {
       if (!deal) return NextResponse.json({ error: 'Deal niet gevonden.' }, { status: 404 })
       ngsDealId = deal.id
     }
+    // Nazorgcall van een workflow van NextGenSolutions (nieuwe werking fase 4).
+    let ngsWorkflowId: string | null = null
+    if (b.ngs_workflow_id) {
+      if (!UUID.test(String(b.ngs_workflow_id))) return NextResponse.json({ error: 'Ongeldige workflow.' }, { status: 400 })
+      const { data: wf } = await admin.from('ngs_workflows').select('id').eq('id', String(b.ngs_workflow_id)).is('verwijderd_op', null).maybeSingle()
+      if (!wf) return NextResponse.json({ error: 'Workflow niet gevonden.' }, { status: 404 })
+      ngsWorkflowId = wf.id
+    }
     let clickupItemId: string | null = null
     if (String(b.clickup_item ?? '').trim()) {
       clickupItemId = clickupTaakIdUit(b.clickup_item)
@@ -192,6 +200,7 @@ export async function POST(req: NextRequest) {
       vorm: w.vorm, locatie: w.locatie, met_meet: w.metMeet,
       created_by: user.id, created_by_email: persoon.email,
       ...(ngsDealId ? { ngs_deal_id: ngsDealId } : {}),
+      ...(ngsWorkflowId ? { ngs_workflow_id: ngsWorkflowId } : {}),
     }
     let ins: { data: unknown; error: { message: string } | null } = { data: null, error: null }
     for (let i = 0; i < 6; i++) {

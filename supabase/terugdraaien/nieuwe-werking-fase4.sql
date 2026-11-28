@@ -1,0 +1,7 @@
+-- Terugdraaien nieuwe werking fase 4 (28 nov 2026). Enkel uitvoeren als het echt moet.
+-- Alles is additief: oude schermen lezen deze kolommen niet, dus laten staan is veilig.
+-- Workflows weer loskoppelen van hun leveringsproject (ze blijven in het rapport van de deal):
+-- UPDATE ngs_workflows SET project_id = NULL WHERE project_id IS NOT NULL;
+-- Nazorgcalls loskoppelen van hun workflow (de meetings zelf blijven):
+-- UPDATE klant_meetings SET ngs_workflow_id = NULL WHERE ngs_workflow_id IS NOT NULL;
+-- Instellingen: de groep "levering" in app_settings.werking mag blijven (wordt genegeerd).

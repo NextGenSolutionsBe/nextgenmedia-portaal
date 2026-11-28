@@ -17,7 +17,7 @@ import { teDoen, gewenst, beschikbaar, meeting as meetingLabel, looptAf, info as
 import { taakIsAf } from '@/lib/sales/lead-taken'
 import { tegentekenSleutel } from '@/lib/contracten/tegenhandtekening-server'
 import { verlengingNodig, verlengingDeadline } from '@/lib/financieel/fase7'
-import { pastBijFilter, MEDIA, type BedrijfFilter } from '@/lib/bedrijven/model'
+import { pastBijFilter, MEDIA, SOLUTIONS, type BedrijfFilter } from '@/lib/bedrijven/model'
 
 // Eén bron voor meldingen + "Vandaag": alles live afgeleid uit bestaande data
 // (geen nieuwe tabel). Gelezen/niet-gelezen wordt client-side in localStorage
@@ -408,7 +408,7 @@ export type OpvolgItem = {
   /** Om een taak bij deze regel te maken. */
   nieuweTaak?: TaakVoorstel | null
 }
-export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'tegentekenen' | 'facturen' | 'mails' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen' | 'offertes' | 'verlengen'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
+export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'tegentekenen' | 'facturen' | 'mails' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen' | 'offertes' | 'verlengen' | 'levering'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
 
 const OPVOLG_MAX = 5
 const dagKort = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
@@ -448,6 +448,7 @@ export async function buildOpvolging(modules: string[] | null, weergave: Bedrijf
     mag('content') ? opvolgOnderhoud() : null,
     mag('opleveringen') ? opvolgOpleveringen() : null,
     mag('offertes') ? opvolgOffertes() : null,
+    mag('ngs_levering') || mag('nextgensolutions') ? opvolgLevering() : null,
   ])
   const lijst = groepen.filter((g): g is OpvolgGroep => !!g)
   await koppelTaken(lijst).catch(() => null)
@@ -729,6 +730,30 @@ export async function buildOpvolging(modules: string[] | null, weergave: Bedrijf
    * staat, of geen startdatum heeft. Enkel zichtbaar als er iets is: lopende
    * contracten vragen geen actie.
    */
+  /**
+   * Levering van Solutions per workflow (nieuwe werking fase 4): langer in bouw dan
+   * de bouwtermijn zonder "Wacht op klant", of een week nazorg zonder call.
+   * Termijnen uit Instellingen → Werking.
+   */
+  async function opvolgLevering(): Promise<OpvolgGroep | null> {
+    if (!past(SOLUTIONS)) return null
+    try {
+      const { leveringOpvolgen } = await import('@/lib/ngs/workflow-levering-server')
+      const lijst = await leveringOpvolgen(admin)
+      if (!lijst.length) return null
+      return {
+        key: 'levering', titel: 'Levering Solutions', totaal: lijst.length, alles: '/admin/nextgensolutions/levering', leeg: 'Alle workflows lopen op schema.',
+        items: lijst.slice(0, OPVOLG_MAX).map((w) => ({
+          id: `${w.soort}:${w.id}`, titel: `${w.klant ? `${w.klant}: ` : ''}${w.naam}`,
+          sub: [w.soort === 'bouw' ? 'langer in bouw dan gepland' : 'nazorg: deze week nog geen call', w.wie].filter(Boolean).join(' · '),
+          href: `/admin/nextgensolutions/levering?project=${w.projectId}`, dringend: true,
+          label: teDoen(w.deadline, vandaag),
+          nieuweTaak: teamTaak('levering', w.id, w.soort === 'bouw' ? ['Klant laten weten waar de bouw staat', 'Bouw afwerken'] : ['Nazorgcall inplannen'], w.klant, w.clientId),
+        })),
+      }
+    } catch { return null }
+  }
+
   async function opvolgOnderhoud(): Promise<OpvolgGroep | null> {
     if (!past(MEDIA)) return null // websites horen bij NextGen Media
     try {

@@ -41,6 +41,8 @@ export type MailContext =
   | { type: 'shoot'; shootId: string }
   // Projectkaart: opvolgmail met voorstellen (herinnering contract, offerte, na de meeting, even polsen, samen zitten, eigen mail).
   | { type: 'project'; opdrachtId: string; voorkeur?: string | null }
+  // NextGenSolutions, levering per workflow: de video van de oplevering naar de klant. Daarna staat "video bij de klant" op de workflow.
+  | { type: 'ngs_workflow'; workflowId: string }
 
 /** Resultaat van een gelukte verzending (of van een eerder gelukte, bij dezelfde verzendpoging). */
 export type MailVerstuurd = { id: string | null; verstuurd_op: string | null; al_verstuurd?: boolean }
@@ -122,6 +124,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
   const meer = opl || isShoot
   const [shootKlant, setShootKlant] = useState<string | null>(null)
   const [shootNog, setShootNog] = useState<string[]>([])
+  const [wfKlant, setWfKlant] = useState<string | null>(null)
   const extraLijst = extraAdressen(extra)
   const aanLijst: { email: string; naam: string | null; soort: Ontvanger['soort'] | 'extra' }[] = meer
     ? [
@@ -141,7 +144,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
     (async () => {
       try {
         // Een meetingmail vertrekt uit de meeting zelf, niet uit een template.
-        const tpl = context.type === 'meeting' || context.type === 'offerte' || context.type === 'algemeen_contract' || context.type === 'shoot' || context.type === 'project' ? { templates: [] } : await (await fetch('/api/admin/email/templates')).json()
+        const tpl = context.type === 'meeting' || context.type === 'offerte' || context.type === 'algemeen_contract' || context.type === 'shoot' || context.type === 'project' || context.type === 'ngs_workflow' ? { templates: [] } : await (await fetch('/api/admin/email/templates')).json()
         const eigen = (tpl.templates ?? []) as Template[]
         // De ingebouwde template van deze soort tonen zolang er geen eigen versie van bestaat.
         const extra = context.type === 'client' && !eigen.some((t) => t.kind === context.kind) ? ingebouwd(context.kind) : null
@@ -243,6 +246,12 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           setToEmail(context.email ?? '')
           setSubject(m.onderwerp); setBody(m.tekst); setCtaText(m.knop); setCtaLink(context.link)
           if (context.merk) setMerk(context.merk)
+        } else if (context.type === 'ngs_workflow') {
+          const r = await fetch(`/api/admin/nextgensolutions/levering?videomail=${context.workflowId}`, { cache: 'no-store' })
+          const j = await r.json()
+          if (!r.ok) throw new Error(j.error || 'Laden mislukt')
+          setToEmail(j.aan ?? ''); setSubject(j.onderwerp); setBody(j.tekst); setCtaText(j.knop); setCtaLink(j.link)
+          setWfKlant(j.client_id ?? null); setMerk('nextgensolutions')
         } else if (context.type === 'project') {
           const r = await fetch(`/api/admin/opdrachten/${context.opdrachtId}/mail`, { cache: 'no-store' })
           const j = await r.json()
@@ -266,7 +275,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
         } else {
           setToEmail(context.toEmail ?? '')
         }
-      } catch (e) { setError(e instanceof Error && (context.type === 'meeting' || context.type === 'klantaccount' || context.type === 'shoot' || context.type === 'project') ? e.message : 'Laden mislukt') } finally { setLoadingCtx(false) }
+      } catch (e) { setError(e instanceof Error && (context.type === 'meeting' || context.type === 'klantaccount' || context.type === 'shoot' || context.type === 'project' || context.type === 'ngs_workflow') ? e.message : 'Laden mislukt') } finally { setLoadingCtx(false) }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -376,6 +385,16 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
             herinnering: tpl?.kind === 'contract_herinnering', merk,
           }),
         })
+      } else if (context.type === 'ngs_workflow') {
+        res = await fetch('/api/admin/email/send', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ to_email: toEmail, to_client_id: wfKlant, subject, body, cta_text: ctaText || null, cta_link: ctaLink || null, kind: 'ngs_workflow', verzend_sleutel: sleutel, merk }),
+        })
+        const j = await res.clone().json().catch(() => ({}))
+        if (res.ok && j.id) {
+          // Op de workflow: video bij de klant. Lukt dat niet, dan is de mail toch vertrokken.
+          await fetch('/api/admin/nextgensolutions/levering', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actie: 'wf.video_gestuurd', workflow: context.workflowId, email_id: j.id }) }).catch(() => null)
+        }
       } else if (context.type === 'project') {
         // Herinnering voor het contract via de contractroute (komt bij het contract onder Verzonden mails), de rest als gewone mail.
         const viaContract = tpl?.kind === 'contract' && !!project?.contract_id

@@ -121,6 +121,15 @@ export function SectieWerking({ ctx }: { ctx: Ctx }) {
           })}
         </div>
       </Groep>
+
+      <Groep titel="Levering per workflow (Solutions)">
+        <Rij>
+          <Getal label="Bouw" eenheid="dagen" value={v.levering.bouw_dagen} min={1} max={120} onChange={(w) => zet('levering', { bouw_dagen: w })} hint="Langer in bouw zonder Wacht op klant = Op te volgen." />
+          <Getal label="Nazorg" eenheid="weken" value={v.levering.nazorg_weken} min={0} max={26} onChange={(w) => zet('levering', { nazorg_weken: w })} hint="Eén call per week." />
+          <Getal label="Nazorgcall" eenheid="min" value={v.levering.nazorg_call_min} min={5} max={240} onChange={(w) => zet('levering', { nazorg_call_min: w })} />
+          <Naam label="Bouwt standaard" value={v.levering.verantwoordelijke} disabled={uit} onChange={(w) => zet('levering', { verantwoordelijke: w })} />
+        </Rij>
+      </Groep>
       </div>
 
       <OpslaanBalk vuil={vuil} bezig={ctx.bezig} onOpslaan={() => ctx.opslaan('werking', leesWerking(v), [])} onAnnuleer={() => setV(bron)} bijgewerkt={ctx.bijgewerkt.werking} />

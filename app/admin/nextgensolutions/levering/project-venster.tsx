@@ -11,6 +11,7 @@ import {
 import { DicteerKnop } from '@/components/admin/dicteer-knop'
 import { Venster, inp, lbl, dagKort, eur, eurCent, tijdstip } from '../ui'
 import { CareLijst, lever, type CareRij } from './care'
+import { WorkflowsSectie, type WfData } from './workflows'
 
 type Project = {
   id: string; deal_id: string | null; client_id: string | null; titel: string; fase: ProjectFase; verantwoordelijke: string | null
@@ -37,12 +38,17 @@ function Sectie({ titel, sub, open, children, waarschuwing }: { titel: string; s
 
 export function ProjectVenster({ id, onSluit, onVernieuw }: { id: string; onSluit: () => void; onVernieuw: () => void }) {
   const [d, setD] = useState<Detail | null>(null)
+  const [wf, setWf] = useState<WfData | null>(null)
   const [bezig, setBezig] = useState<string | null>(null)
   const laad = useCallback(async () => {
-    const r = await fetch(`/api/admin/nextgensolutions/levering?project=${id}`, { cache: 'no-store' })
+    const [r, rw] = await Promise.all([
+      fetch(`/api/admin/nextgensolutions/levering?project=${id}`, { cache: 'no-store' }),
+      fetch(`/api/admin/nextgensolutions/levering?workflows=${id}`, { cache: 'no-store' }),
+    ])
     const j = await r.json().catch(() => ({}))
     if (!r.ok) { toast.error(j.error || 'Laden mislukt'); onSluit(); return }
     setD(j as Detail)
+    if (rw.ok) setWf((await rw.json()) as WfData)
   }, [id, onSluit])
   useEffect(() => { void laad() }, [laad])
 
@@ -57,6 +63,9 @@ export function ProjectVenster({ id, onSluit, onVernieuw }: { id: string; onSlui
   const plan = planUitStories(geldig, p.plan_uurtarief)
   const u = urenStand(geldig)
   const faseIdx = PROJECT_FASES.findIndex((f) => f.key === p.fase)
+  // Met workflows uit het auditrapport ligt de vaste prijs per workflow vast; het oude plan (uren × tarief) valt weg.
+  const metWf = !!wf?.workflows.length
+  const wfPrijs = (wf?.workflows ?? []).reduce((s, w) => s + (w.prijs ?? 0), 0)
 
   return (
     <Venster breed onSluit={onSluit} titel={p.titel}
@@ -72,13 +81,16 @@ export function ProjectVenster({ id, onSluit, onVernieuw }: { id: string; onSlui
       <div className="grid grid-cols-3 gap-2 text-center">
         <Getal label="User stories" waarde={`${geldig.filter((s) => s.status === 'klaar').length}/${geldig.filter((s) => s.status !== 'voorstel').length}`} sub="klaar" />
         <Getal label="Uren" waarde={`${u.besteed}/${u.geschat}`} sub={u.over ? 'meer dan geschat' : 'besteed / geschat'} rood={u.over} />
-        <Getal label="Vaste prijs" waarde={p.plan_goedgekeurd_op && p.plan_prijs ? eur(p.plan_prijs) : plan.prijs ? `± ${eur(plan.prijs)}` : '—'} sub={p.plan_goedgekeurd_op ? 'goedgekeurd' : 'nog niet goedgekeurd'} />
+        {metWf
+          ? <Getal label="Vaste prijs" waarde={wfPrijs ? eur(wfPrijs) : '—'} sub={`${wf!.workflows.length} ${wf!.workflows.length === 1 ? 'workflow' : 'workflows'}`} />
+          : <Getal label="Vaste prijs" waarde={p.plan_goedgekeurd_op && p.plan_prijs ? eur(p.plan_prijs) : plan.prijs ? `± ${eur(plan.prijs)}` : '—'} sub={p.plan_goedgekeurd_op ? 'goedgekeurd' : 'nog niet goedgekeurd'} />}
       </div>
 
+      {wf && <WorkflowsSectie data={wf} clientId={p.client_id} stories={d.stories} bezig={bezig} doe={doe} onVernieuw={() => { void laad(); onVernieuw() }} />}
       <Tijdscan p={p} klantId={p.client_id} bezig={bezig} doe={doe} stories={d.stories} />
       <BriefingSectie p={p} bezig={bezig} doe={doe} />
-      <Stories p={p} stories={d.stories} bezig={bezig} doe={doe} />
-      <PlanSectie p={p} stories={d.stories} bezig={bezig} doe={doe} />
+      <Stories p={p} stories={d.stories} bezig={bezig} doe={doe} workflows={(wf?.workflows ?? []).map((w) => ({ id: w.id, naam: w.naam }))} />
+      {!metWf && <PlanSectie p={p} stories={d.stories} bezig={bezig} doe={doe} />}
       <Review p={p} bezig={bezig} doe={doe} />
 
       <Sectie titel="Care" sub={d.care.length ? `${d.care.length} in Care` : 'na de oplevering'}>
@@ -194,7 +206,7 @@ function BriefingSectie({ p, bezig, doe }: { p: Project; bezig: string | null; d
 }
 
 /** User stories met acceptatiecriteria, schatting, bestede uren en de definitie van klaar. */
-function Stories({ p, stories, bezig, doe }: { p: Project; stories: UserStory[]; bezig: string | null; doe: Doe }) {
+function Stories({ p, stories, bezig, doe, workflows }: { p: Project; stories: UserStory[]; bezig: string | null; doe: Doe; workflows: { id: string; naam: string }[] }) {
   const [nieuw, setNieuw] = useState<{ titel: string; als: string; wil: string; zodat: string; acceptatiecriteria: string; schatting_uren: string } | null>(null)
   const [open, setOpen] = useState<string | null>(null)
   return (
@@ -213,7 +225,7 @@ function Stories({ p, stories, bezig, doe }: { p: Project; stories: UserStory[];
                 <span className="text-[11px] text-gray-500 tabular-nums">{s.bestede_uren}/{s.schatting_uren ?? '?'} u</span>
                 <span className={`text-[11px] rounded-full px-2 py-0.5 border ${s.status === 'klaar' ? 'bg-green-50 border-green-100 text-green-800' : s.status === 'voorstel' ? 'bg-gray-50 border-gray-200 text-gray-600' : 'bg-white border-gray-200 text-gray-800'}`}>{STORY_STATUSSEN.find((x) => x.key === s.status)?.label}</span>
               </button>
-              {isOpen && <StoryDetail p={p} s={s} bezig={bezig} doe={doe} klaarFout={klaarFout} />}
+              {isOpen && <StoryDetail p={p} s={s} bezig={bezig} doe={doe} klaarFout={klaarFout} workflows={workflows} />}
             </li>
           )
         })}
@@ -240,7 +252,7 @@ function Stories({ p, stories, bezig, doe }: { p: Project; stories: UserStory[];
   )
 }
 
-function StoryDetail({ p, s, bezig, doe, klaarFout }: { p: Project; s: UserStory; bezig: string | null; doe: Doe; klaarFout: string | null }) {
+function StoryDetail({ p, s, bezig, doe, klaarFout, workflows }: { p: Project; s: UserStory; bezig: string | null; doe: Doe; klaarFout: string | null; workflows: { id: string; naam: string }[] }) {
   const [v, setV] = useState({ titel: s.titel, als: s.als, wil: s.wil, zodat: s.zodat, acceptatiecriteria: s.acceptatiecriteria.join('\n'), schatting_uren: s.schatting_uren === null ? '' : String(s.schatting_uren).replace('.', ',') })
   const [uren, setUren] = useState('')
   const [dodNieuw, setDodNieuw] = useState('')
@@ -255,6 +267,14 @@ function StoryDetail({ p, s, bezig, doe, klaarFout }: { p: Project; s: UserStory
             className={`px-2.5 py-1 rounded-full text-xs border ${s.status === x.key ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white hover:border-gray-400'}`}>{x.label}</button>
         ))}
       </div>
+      {workflows.length > 0 && (
+        <label className="block"><span className={lbl}>Workflow</span>
+          <select className={inp} value={s.workflow_id ?? ''} disabled={!!bezig} onChange={(e) => wijzig({ workflow_id: e.target.value || null }, `wf${s.id}`, 'Bewaard.')}>
+            <option value="">Geen workflow</option>
+            {workflows.map((w) => <option key={w.id} value={w.id}>{w.naam}</option>)}
+          </select>
+        </label>
+      )}
       <input className={inp} value={v.titel} onChange={(e) => setV({ ...v, titel: e.target.value })} />
       <div className="grid sm:grid-cols-3 gap-2">
         <input className={inp} value={v.als} onChange={(e) => setV({ ...v, als: e.target.value })} placeholder="Als …" />

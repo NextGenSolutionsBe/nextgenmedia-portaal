@@ -149,7 +149,7 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
   /** Vanuit Calendar: een algemene afspraak (stage, verzekering, overleg; standaard op ons kantoor) of een meeting met een klant. */
   soort?: 'algemeen' | 'klant'
   /** Vanuit Calendar (gesleept of getikt): datum, uur, duur en agenda alvast ingevuld. */
-  voorinvul?: { dag?: string; uur?: string; duur?: number; agendaId?: string | null; clientId?: string | null; ngsDealId?: string | null }
+  voorinvul?: { dag?: string; uur?: string; duur?: number; agendaId?: string | null; clientId?: string | null; ngsDealId?: string | null; ngsWorkflowId?: string | null }
   /** Vlak vóór het opslaan opnieuw nagaan of het moment nog vrij is (Calendar). */
   controleerVrij?: boolean
   onSluit: () => void; onKlaar: (m: Meeting, melding: string) => void; onOpen: (id: string) => void
@@ -251,7 +251,7 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
   async function bewaar(tochInplannen = false, tochConflict = false) {
     if (probleem) { toast.error(probleem); return }
     setBezig(true); setFout(null); setDubbel(null); setConflict(null)
-    const koppel = { client_id: clientId || null, project_id: projectId || null, clickup_item: clickupItem.trim(), ...(!bestaand && voorinvul?.ngsDealId ? { ngs_deal_id: voorinvul.ngsDealId } : {}) }
+    const koppel = { client_id: clientId || null, project_id: projectId || null, clickup_item: clickupItem.trim(), ...(!bestaand && voorinvul?.ngsDealId ? { ngs_deal_id: voorinvul.ngsDealId } : {}), ...(!bestaand && voorinvul?.ngsWorkflowId ? { ngs_workflow_id: voorinvul.ngsWorkflowId } : {}) }
     try {
       if (bestaand) {
         const j = await api<{ meeting: Meeting; ongewijzigd?: boolean; herinneringFout?: string | null; googleFout?: string | null }>(`/api/admin/meetings/${bestaand.id}`, { method: 'PATCH', body: JSON.stringify({ actie: 'wijzig', ...invoer, ...koppel, controleer_vrij: !!controleerVrij, toch_conflict: tochConflict }) })
@@ -848,7 +848,7 @@ function Bron({ x }: { x: Item }) {
 }
 
 type Tab = 'komend' | 'voorbij' | 'geannuleerd'
-type Venster = { soort: 'plan'; meeting: Meeting | null; dag?: string; klant?: string | null; deal?: string | null } | { soort: 'detail'; id: string } | { soort: 'annuleer'; meeting: Meeting } | { soort: 'koppelingen' } | { soort: 'afspraak'; a: Afspraak } | null
+type Venster = { soort: 'plan'; meeting: Meeting | null; dag?: string; klant?: string | null; deal?: string | null; workflow?: string | null } | { soort: 'detail'; id: string } | { soort: 'annuleer'; meeting: Meeting } | { soort: 'koppelingen' } | { soort: 'afspraak'; a: Afspraak } | null
 
 export function MeetingsClient() {
   const router = useRouter()
@@ -873,7 +873,7 @@ export function MeetingsClient() {
   // Deep-link vanuit zoeken of een melding: ?meeting=<id>
   useEffect(() => { const id = params.get('meeting'); if (id) setVenster({ soort: 'detail', id }) }, [params])
   // Vanuit Projecten (Account-based marketing): ?plan=1&klant=<id> opent het planvenster met die klant.
-  useEffect(() => { if (params.get('plan') === '1') setVenster({ soort: 'plan', meeting: null, klant: params.get('klant'), deal: params.get('deal') }) }, [params])
+  useEffect(() => { if (params.get('plan') === '1') setVenster({ soort: 'plan', meeting: null, klant: params.get('klant'), deal: params.get('deal'), workflow: params.get('workflow') }) }, [params])
 
   const sluit = useCallback(() => { setVenster(null); if (params.get('meeting')) router.replace('/admin/meetings') }, [params, router])
   const open = (x: Item) => setVenster(x.soort === 'meeting' ? { soort: 'detail', id: x.m.id } : { soort: 'afspraak', a: x.a })
@@ -959,7 +959,7 @@ export function MeetingsClient() {
       )}
 
       {venster?.soort === 'plan' && opties && (
-        <PlanVenster opties={opties} bestaand={venster.meeting} startDag={venster.dag} voorinvul={venster.klant || venster.deal ? { clientId: venster.klant ?? null, ngsDealId: venster.deal ?? null } : undefined} onSluit={() => setVenster(venster.meeting ? { soort: 'detail', id: venster.meeting.id } : null)}
+        <PlanVenster opties={opties} bestaand={venster.meeting} startDag={venster.dag} voorinvul={venster.klant || venster.deal || venster.workflow ? { clientId: venster.klant ?? null, ngsDealId: venster.deal ?? null, ngsWorkflowId: venster.workflow ?? null } : undefined} onSluit={() => setVenster(venster.meeting ? { soort: 'detail', id: venster.meeting.id } : null)}
           onOpen={(id) => setVenster({ soort: 'detail', id })}
           onKlaar={(m, melding) => { if (melding) toast.success(melding); laad(); setVenster({ soort: 'detail', id: m.id }) }} />
       )}

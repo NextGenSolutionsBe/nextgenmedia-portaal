@@ -9,6 +9,7 @@ import { klantWorkflow } from '@/lib/ngs/audit'
 import { RapportFout, laadRapport, auditLijst, rapportActie } from '@/lib/ngs/audit-server'
 import { voorstelRapport } from '@/lib/ngs/audit-ai'
 import { maakRapportPdf } from '@/lib/ngs/rapport-pdf'
+import { leesInstellingen } from '@/lib/instellingen/laden'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -36,14 +37,18 @@ export async function GET(req: NextRequest) {
     if (sp.get('audits')) return NextResponse.json({ audits: await auditLijst(admin) }, { headers: { 'Cache-Control': 'no-store' } })
     const pdfVan = sp.get('pdf')
     if (pdfVan) {
-      const r = await laadRapport(admin, pdfVan)
-      const { data: b } = await admin.from('bedrijven').select('handelsnaam, naam').eq('slug', 'nextgensolutions').maybeSingle()
+      const [r, { data: b }, inst] = await Promise.all([
+        laadRapport(admin, pdfVan),
+        admin.from('bedrijven').select('handelsnaam, naam').eq('slug', 'nextgensolutions').maybeSingle(),
+        leesInstellingen(),
+      ])
       const handels = (b as { handelsnaam?: string | null; naam?: string | null } | null)?.handelsnaam || 'NextGenSolutions'
       const bytes = await maakRapportPdf({
         klant: r.deal.bedrijf,
         datum: new Date(r.deal.rapport_afgerond_op ?? Date.now()).toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Brussels' }),
         workflows: r.workflows.map((w) => klantWorkflow(w, r.processen, r.prijzen)),
         handelsnaam: `${BEDRIJF.vennootschap}, handelsnaam ${handels}`,
+        nazorgWeken: inst.werking.levering.nazorg_weken,
       })
       const naam = `Auditrapport ${r.deal.bedrijf}`.replace(/[^\p{L}\p{N} _-]/gu, '').slice(0, 80)
       return new NextResponse(Buffer.from(bytes), { headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${naam}.pdf"`, 'Cache-Control': 'no-store' } })
