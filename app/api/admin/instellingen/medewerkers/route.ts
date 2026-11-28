@@ -9,7 +9,7 @@ import { sanitizeModules } from '@/lib/staff'
 import { eisBeheer, eisHoofdbeheerder } from '@/lib/instellingen/api'
 import { STAFF_ROLLEN } from '@/lib/instellingen/model'
 import { lijstMedewerkers } from '@/lib/instellingen/medewerkers-server'
-import { netteBedrijven } from '@/lib/team/rollen'
+import { netteBedrijven, PROFIEL_VAN_SJABLOON } from '@/lib/team/rollen'
 import { laadSjablonen, stappenToevoegen, onboardingOverzicht } from '@/lib/team/rollen-server'
 
 export const dynamic = 'force-dynamic'
@@ -86,7 +86,12 @@ export async function POST(req: NextRequest) {
     if (sjabloon?.onboarding.length) { try { await stappenToevoegen(admin, row.id, sjabloon.onboarding) } catch { /* */ } }
     // Werknemers en Personeel zijn één geheel: elke interne login krijgt een
     // personeelsdossier (uren, planning, documenten) op dezelfde login.
-    try { await dossierVoorWerknemer(admin, { id: row.id, auth_user_id: uid, email, name: naam, voornaam, achternaam: achternaam || null, functie, active: true }, g.persoon.email) } catch { /* dossier is best-effort */ }
+    try {
+      const dossier = await dossierVoorWerknemer(admin, { id: row.id, auth_user_id: uid, email, name: naam, voornaam, achternaam: achternaam || null, functie, active: true }, g.persoon.email)
+      // Het functieprofiel van het sjabloon (nieuwe werking), enkel als het dossier er nog geen heeft.
+      const profiel = sjabloon ? PROFIEL_VAN_SJABLOON[sjabloon.key] : undefined
+      if (dossier && profiel) await admin.from('personeel').update({ functieprofiel: profiel }).eq('id', dossier.id).is('functieprofiel', null)
+    } catch { /* dossier is best-effort */ }
     try { revalidatePath('/admin/werknemers'); revalidatePath('/admin/instellingen'); revalidatePath('/admin/personeel') } catch { /* */ }
     return NextResponse.json({ ok: true, id: row.id, uitnodigingNodig: !wachtwoord })
   } catch (err) {

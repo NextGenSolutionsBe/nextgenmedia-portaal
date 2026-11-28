@@ -6,13 +6,14 @@ import { logAudit, requestMeta } from '@/lib/audit'
 import { leesInstellingen, bewaarInstelling } from '@/lib/instellingen/laden'
 import { eisBeheer } from '@/lib/instellingen/api'
 import { vergeetInstellingenCache } from '@/lib/instellingen/edge'
+import { leesWerking } from '@/lib/werking/instellingen'
 import { INSTELLINGEN_SLEUTELS, MODULES, type InstellingenSleutel, type AlleInstellingen } from '@/lib/instellingen/model'
 import { valideerOrganisatie, valideerFacturatie, valideerDocumenten, valideerModules, valideerRechten, valideerVerkoop, verschillen, uittreksel } from '@/lib/instellingen/valideer'
 
 export const dynamic = 'force-dynamic'
 
 const LABEL: Record<InstellingenSleutel, string> = {
-  organisatie: 'Bedrijfsgegevens', modules: 'Tabbladen en modules', rechten: 'Gebruikersrechten', facturatie: 'Facturatie-instellingen', documenten: 'Documenten en branding', verkoop: 'Verkoop',
+  organisatie: 'Bedrijfsgegevens', modules: 'Tabbladen en modules', rechten: 'Gebruikersrechten', facturatie: 'Facturatie-instellingen', documenten: 'Documenten en branding', verkoop: 'Verkoop', werking: 'Werking',
 }
 
 // GET — alle instellingen + context voor de pagina.
@@ -52,6 +53,14 @@ export async function PUT(req: NextRequest) {
       case 'rechten': { const v = valideerRechten(b.waarde); if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 }); nieuw = v.waarde; break }
       case 'verkoop': { const v = valideerVerkoop(b.waarde); if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 }); nieuw = v.waarde; break }
       case 'documenten': { const v = valideerDocumenten(b.waarde, huidig.documenten); if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 }); nieuw = v.waarde; break }
+      case 'werking': {
+        // Bedragen, termijnen en eigenaars van de nieuwe werking: enkel de zaakvoerders.
+        if (!g.persoon.isAdmin) return NextResponse.json({ error: 'Enkel de zaakvoerders passen de werking aan.' }, { status: 403 })
+        const w = leesWerking(b.waarde)
+        // Het vaste blok van het weekoverleg zet de app zelf (Ritme → Vast moment instellen).
+        nieuw = { ...w, weekoverleg: { ...w.weekoverleg, reeks_id: huidig.werking.weekoverleg.reeks_id } }
+        break
+      }
       case 'facturatie': {
         const v = valideerFacturatie(b.waarde); if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 })
         // Facturen gaan niet meer naar ClickUp; de oude lijstvelden blijven bewaard maar sturen niets meer aan.

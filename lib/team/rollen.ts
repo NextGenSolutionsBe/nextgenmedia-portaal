@@ -60,9 +60,9 @@ export const START_SJABLONEN: RolSjabloon[] = [
   },
   {
     key: 'uitvoerder_solutions', naam: 'Uitvoerder Solutions', omschrijving: 'Werkt aan AI-automatisatie en software voor NextGenSolutions.',
-    rol: 'medewerker', modules: ['agenda', 'nextgensolutions', 'opdrachten', 'meetings', 'uploads', 'info'],
-    bedrijven: [SOLUTIONS], startpagina: '/admin/agenda', volgorde: 3, actief: true, standaard: true,
-    onboarding: [...ALGEMENE_STAPPEN, 'Pipeline NextGenSolutions doornemen', 'Projecten van Solutions bekijken'],
+    rol: 'medewerker', modules: ['agenda', 'ngs_levering', 'meetings', 'uploads', 'info'],
+    bedrijven: [SOLUTIONS], startpagina: '/admin/nextgensolutions/levering', volgorde: 3, actief: true, standaard: true,
+    onboarding: [...ALGEMENE_STAPPEN, 'Levering van NextGenSolutions doornemen (workflows, user stories, Care)', 'Briefing van 30 minuten met Marco over de werkwijze'],
   },
   {
     key: 'uitvoerder_media', naam: 'Uitvoerder Media', omschrijving: 'Content, shoots en opleveringen voor NextGenMedia.',
@@ -208,6 +208,51 @@ export function stappenErbij(bestaand: Pick<OnboardingStap, 'titel'>[], nieuw: s
 // ── Functieprofiel ───────────────────────────────────────────────────────────
 
 export type Functieprofiel = { doel: string; taken: string[]; verantwoordelijkheden: string[]; rapporteert_aan: string; competenties: string[] }
+
+/**
+ * Functieprofielen van de nieuwe werking (28 nov 2026, uit de afspraken van de
+ * vennoten). Per persoon voor Personeel, en per sjabloon: een nieuw account met
+ * dat sjabloon krijgt het profiel in zijn dossier als daar nog niets staat.
+ */
+export const PROFIEL_VENNOTEN: Record<'marco' | 'bram' | 'chiara', Functieprofiel> = {
+  marco: {
+    doel: 'COO: de interne werking en de groei van NextGenSolutions.',
+    taken: ['Mensen, processen, tools en structuur', 'Sales en groei van NextGenSolutions', 'Supportcalls van Care opnemen', 'Auditdagen ter plaatse'],
+    verantwoordelijkheden: ['Domein Solutions', 'Domein Interne werking', 'Aanspreekpunt van Jonathan'],
+    rapporteert_aan: 'Geen hiërarchie: beslist binnen het eigen domein',
+    competenties: [],
+  },
+  bram: {
+    doel: 'CFO: financiën, legal en de groei van NextGenMedia.',
+    taken: ['Financiën, legal en contracten', "KPI's opvolgen", 'Investeren en besparen', 'Sales en groei van NextGenMedia'],
+    verantwoordelijkheden: ['Domein Financiën & legal'],
+    rapporteert_aan: 'Geen hiërarchie: beslist binnen het eigen domein',
+    competenties: [],
+  },
+  chiara: {
+    doel: 'Operationeel manager Media.',
+    taken: ['Planning en timing', 'Strategie achter de content', 'Contentmanagement', 'Ad-hocwerk en meetings'],
+    verantwoordelijkheden: ['Planning Media'],
+    rapporteert_aan: 'Geen hiërarchie: beslist binnen het eigen domein',
+    competenties: [],
+  },
+}
+export const PROFIEL_VAN_SJABLOON: Record<string, Functieprofiel> = {
+  uitvoerder_media: {
+    doel: 'Uitvoerend Media.',
+    taken: ['Posts', 'Videomontage', 'Visuals, folders en branding', 'Contentmanagement samen met Chiara', 'Later ook foto en video bij klanten'],
+    verantwoordelijkheden: ['Uitvoering in Planning Media'],
+    rapporteert_aan: 'Chiara (planning)',
+    competenties: [],
+  },
+  uitvoerder_solutions: {
+    doel: 'Uitvoerend Solutions.',
+    taken: ['Workflows bouwen', 'Auditrapport schrijven', 'Opleveringsvideo maken', 'Nazorg'],
+    verantwoordelijkheden: ['Bouw, video en nazorg per workflow'],
+    rapporteert_aan: 'Marco',
+    competenties: [],
+  },
+}
 export const LEEG_PROFIEL: Functieprofiel = { doel: '', taken: [], verantwoordelijkheden: [], rapporteert_aan: '', competenties: [] }
 
 const regels = (v: unknown): string[] =>

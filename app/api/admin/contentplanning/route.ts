@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { safeMessage } from '@/lib/api-error'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
-import { magIk } from '@/lib/instellingen/laden'
+import { magIk, leesInstellingen } from '@/lib/instellingen/laden'
 import { leesActorNamen } from '@/lib/actor-namen'
 import {
   leesCp, beurtenMetBord, bordVanKlant, teMakenTaken, isReeks, plusDagen, maandVan, plusMaanden, maandEind, werkdagenVanMaand, FASE_KEYS, STANDAARD_CP,
@@ -110,7 +110,9 @@ export async function GET(req: NextRequest) {
       const namen = await leesActorNamen(admin as never, ((admins ?? []) as { user_id: string }[]).map((a) => a.user_id))
       mensen = [...new Set([...Object.values(namen).map((n) => n.kort), ...((staff ?? []) as { name: string | null }[]).map((s) => (s.name ?? '').split(' ')[0])].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'nl'))
     } catch { /* lijst is een gemak, geen vereiste */ }
+    const eigenaars = (await leesInstellingen()).werking.planning
     return NextResponse.json({
+      eigenaars,
       instellingen: inst, batches: batches ?? [], klanten: klanten ?? [], cpKlanten: cpKlanten ?? [], cycli: cycli ?? [], taken: taken ?? [],
       notities: notities ?? [], checks: checks ?? [],
       faseAanpassingen: Object.fromEntries(((fases ?? []) as { plan_date: string; categories: string[] }[]).map((f) => [String(f.plan_date).slice(0, 10), f.categories])),

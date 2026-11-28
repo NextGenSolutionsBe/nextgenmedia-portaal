@@ -10,6 +10,7 @@
 
 import { ADMIN_MODULES } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
+import { STANDAARD_WERKING, leesWerking, type WerkingInstellingen } from '@/lib/werking/instellingen'
 
 // ── Rollen ───────────────────────────────────────────────────────────────────
 
@@ -67,6 +68,7 @@ const SECTIE_VAN: Record<string, string> = {
   clients: 'Klanten & legal', opdrachten: 'Klanten & legal', aanvragen: 'Klanten & legal', offertes: 'Klanten & legal', contracts: 'Klanten & legal', algemene_contracten: 'Klanten & legal', sales: 'Klanten & legal', harrie_api: 'Klanten & legal',
   content: 'NextGenMedia', shoots: 'NextGenMedia', opleveringen: 'NextGenMedia', metricool: 'NextGenMedia', blogs: 'NextGenMedia', uploads: 'NextGenMedia', formulieren: 'NextGenMedia', materiaal: 'NextGenMedia',
   nextgensolutions: 'NextGenSolutions',
+  ngs_levering: 'NextGenSolutions',
   finance: 'Financieel', invoices: 'Financieel', vesting: 'Financieel', purchases: 'Financieel',
   founders: 'Klantapp', onze_partners: 'Klantapp', nieuwsbrieven: 'Klantapp', events: 'Klantapp',
   kantoor: 'Team & partners', partners: 'Team & partners', assignments: 'Team & partners', settlements: 'Team & partners',
@@ -76,7 +78,7 @@ const SECTIE_VAN: Record<string, string> = {
 const HREF_VAN: Record<string, string> = {
   clients: '/admin/clients', contracts: '/admin/contracts', offertes: '/admin/offertes', content: '/admin/services', metricool: '/admin/metricool', blogs: '/admin/blog-calendar', uploads: '/admin/uploads', opdrachten: '/admin/opdrachten', formulieren: '/admin/formulieren', meetings: '/admin/meetings', shoots: '/admin/shoots',
   kantoor: '/admin/kantoor', algemene_contracten: '/admin/algemene-contracten', partners: '/admin/partners', assignments: '/admin/assignments', settlements: '/admin/settlements',
-  sales: '/admin/opdrachten', harrie_api: '/admin/sales/koppeling', nextgensolutions: '/admin/nextgensolutions',
+  sales: '/admin/opdrachten', harrie_api: '/admin/sales/koppeling', nextgensolutions: '/admin/nextgensolutions', ngs_levering: '/admin/nextgensolutions/levering',
   finance: '/admin/revenue/omzet', invoices: '/admin/invoices', vesting: '/admin/vesting', purchases: '/admin/purchases',
   email: '/admin/email', info: '/admin/informatief', materiaal: '/admin/materiaal',
   personeel: '/admin/personeel', agenda: '/admin/agenda',
@@ -198,12 +200,14 @@ export type AlleInstellingen = {
   facturatie: FacturatieInstellingen
   documenten: DocumentenInstellingen
   verkoop: VerkoopInstellingen
+  /** Nieuwe werking (28 nov 2026): domeinen, weekoverleg, Planning Media, verkoop en prijzen van Solutions … (lib/werking/instellingen.ts). */
+  werking: WerkingInstellingen
 }
-export const INSTELLINGEN_SLEUTELS = ['organisatie', 'modules', 'rechten', 'facturatie', 'documenten', 'verkoop'] as const
+export const INSTELLINGEN_SLEUTELS = ['organisatie', 'modules', 'rechten', 'facturatie', 'documenten', 'verkoop', 'werking'] as const
 export type InstellingenSleutel = (typeof INSTELLINGEN_SLEUTELS)[number]
 
 export function standaardInstellingen(): AlleInstellingen {
-  return { organisatie: { ...STANDAARD_ORGANISATIE }, modules: standaardModules(), rechten: standaardRechten(), facturatie: { ...STANDAARD_FACTURATIE }, documenten: { ...STANDAARD_DOCUMENTEN }, verkoop: { verantwoordelijken: [...STANDAARD_VERKOOP.verantwoordelijken] } }
+  return { organisatie: { ...STANDAARD_ORGANISATIE }, modules: standaardModules(), rechten: standaardRechten(), facturatie: { ...STANDAARD_FACTURATIE }, documenten: { ...STANDAARD_DOCUMENTEN }, verkoop: { verantwoordelijken: [...STANDAARD_VERKOOP.verantwoordelijken] }, werking: leesWerking(STANDAARD_WERKING) }
 }
 
 /** Opgeslagen waarden over de standaard heen leggen; onbekende/stukke waarden vallen terug. */
@@ -219,6 +223,7 @@ export function samenvoegen(ruw: Partial<Record<InstellingenSleutel, unknown>> |
     const namen = vk.verantwoordelijken.filter((x): x is string => typeof x === 'string').map((x) => x.trim()).filter(Boolean)
     if (namen.length) std.verkoop = { verantwoordelijken: namen }
   }
+  if (ruw.werking) std.werking = leesWerking(ruw.werking)
   const mods = obj(ruw.modules)
   if (mods) for (const k of Object.keys(std.modules)) {
     const m = obj(mods[k]); if (!m) continue

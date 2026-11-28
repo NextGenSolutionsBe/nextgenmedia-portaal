@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { Suspense } from 'react'
 import Link from 'next/link'
 import { RitmeClient } from './ritme/ritme-client'
+import { overlegLoopt } from '@/lib/werking/instellingen'
 import { WerkvoorraadBlok } from './ritme/werkvoorraad'
 import { getActor, actorCanSee } from '@/lib/actor-modules'
 import { TodayPanel } from './today-panel'
@@ -10,7 +11,7 @@ import { RecentActivity } from './recent-activity'
 import { OpvolgingPanel } from './opvolging-panel'
 import { TakenBlok } from '@/components/admin/taken-blok'
 import { MailProjecten } from '@/components/admin/mail-projecten'
-import { magIk } from '@/lib/instellingen/laden'
+import { magIk, leesInstellingen } from '@/lib/instellingen/laden'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { mijnDeadlines } from '@/lib/agenda/deadlines-server'
 import { DeadlinesBlok } from './agenda/deadlines-blok'
@@ -45,16 +46,22 @@ async function AgendaDeadlines({ userId }: { userId: string }) {
 // (iedereen mag /admin), dus filteren we hier zelf. Een appointment setter met
 // enkel de Verkoop-module hoort hier geen klanten, contracten of facturen te
 // zien — die ziet enkel zijn eigen pipeline.
-export default async function CommandCenter({ searchParams }: { searchParams?: { tab?: string } }) {
+export default async function CommandCenter({ searchParams }: { searchParams?: { tab?: string; deel?: string } }) {
   const today = new Date()
   const actor = await getActor()
   const can = (key: string) => !!actor && actorCanSee(actor, key)
   const isAdmin = !!actor?.isAdmin
   const ritme = isAdmin && searchParams?.tab === 'ritme'
-  const [agendaToevoegen, meetingsPlannen] = await Promise.all([
+  const [agendaToevoegen, meetingsPlannen, inst] = await Promise.all([
     can('agenda') ? magIk('agenda', 'toevoegen') : null,
     can('meetings') ? magIk('meetings', 'toevoegen') : null,
+    isAdmin ? leesInstellingen() : null,
   ])
+  // Tijdens het vaste weekoverleg: één regel bovenaan die het overleg opent.
+  const brussel = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Brussels', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(today)
+  const dagNr = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(brussel.find((p) => p.type === 'weekday')?.value ?? '') + 1
+  const uurNu = `${brussel.find((p) => p.type === 'hour')?.value ?? '00'}:${brussel.find((p) => p.type === 'minute')?.value ?? '00'}`
+  const overlegNu = !!inst && overlegLoopt(inst.werking, dagNr, uurNu)
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -77,7 +84,12 @@ export default async function CommandCenter({ searchParams }: { searchParams?: {
           ))}
         </div>
       )}
-      {ritme ? <RitmeClient /> : <>
+      {overlegNu && !(ritme && searchParams?.deel === 'overleg') && (
+        <Link href="/admin?tab=ritme&deel=overleg" prefetch={false} className="card-base flex items-center gap-2 text-sm font-medium hover:bg-gray-50">
+          <span className="h-2 w-2 rounded-full bg-black" aria-hidden />Het weekoverleg loopt nu<span className="flex-1" /><span className="text-gray-500">Openen →</span>
+        </Link>
+      )}
+      {ritme ? <RitmeClient start={searchParams?.deel} /> : <>
 
       {/* Jouw deadlines van vandaag, het uur groot vooraan. */}
       {actor && can('agenda') && (

@@ -71,7 +71,7 @@ const SECTIONS: NavSection[] = [
     title: 'NextGenMedia',
     open: true,
     items: [
-      { label: 'Dagelijkse planning', href: '/admin/contentplanning', icon: CalendarDays, module: 'info' },
+      { label: 'Planning Media', href: '/admin/contentplanning', icon: CalendarDays, module: 'info' },
       // De contentkalenders per klant (ingeplande posts, feedback van de klant).
       { label: 'Social media', href: '/admin/services/social-media', icon: Calendar, module: 'content' },
       // Shoots: kalender, plan per uur en locatie, briefing en mail met het plan.
@@ -98,7 +98,7 @@ const SECTIONS: NavSection[] = [
     open: true,
     items: [
       { label: 'Pipeline', href: '/admin/nextgensolutions', icon: Target, module: 'nextgensolutions', exact: true },
-      { label: 'Levering', href: '/admin/nextgensolutions/levering', icon: Wrench, module: 'nextgensolutions' },
+      { label: 'Levering', href: '/admin/nextgensolutions/levering', icon: Wrench, module: 'ngs_levering', ookModule: 'nextgensolutions' },
       { label: 'Cijfers', href: '/admin/nextgensolutions/cijfers', icon: LineChart, module: 'nextgensolutions' },
     ],
   },
@@ -296,9 +296,7 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
     .map((s) => ({
       title: s.title,
       open: s.open ?? false,
-      items: s.items.filter(canSee).map((it, i) => [it, i] as const).sort((a, b) => (volgordeVan(a[0]) - volgordeVan(b[0])) || (a[1] - b[1])).map(([it]) => it)
-        // De naam van wie de dagelijkse planning doet, komt uit de instellingen (fase 4), niet uit de code.
-        .map((it) => (it.href === '/admin/contentplanning' ? { ...it, label: `Dagelijkse planning ${(instellingen?.organisatie.planning_persoon ?? 'Chiara').trim()}`.trim() } : it)),
+      items: s.items.filter(canSee).map((it, i) => [it, i] as const).sort((a, b) => (volgordeVan(a[0]) - volgordeVan(b[0])) || (a[1] - b[1])).map(([it]) => it),
     }))
     .filter((s) => s.items.length > 0)
 

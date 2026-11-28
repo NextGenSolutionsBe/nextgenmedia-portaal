@@ -27,9 +27,7 @@ export function SectieBedrijf({ ctx }: { ctx: Ctx }) {
           </div>
         </Groep>
         <Groep titel="Namen in de app">
-          <div className="grid sm:grid-cols-3 gap-3">
-            <Tekst label="Dagelijkse planning van" value={v.planning_persoon ?? 'Chiara'} onChange={(w) => zet('planning_persoon', w)} placeholder="Chiara" hint="In de zijbalk: Dagelijkse planning …" />
-          </div>
+          <p className="text-sm text-gray-600">De planning heet Planning Media. Wie welk werk doet, kies je in Instellingen → Werking.</p>
         </Groep>
         <Groep titel="Adressen">
           <div className="grid sm:grid-cols-2 gap-3">

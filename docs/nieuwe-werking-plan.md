@@ -1,6 +1,10 @@
 # Plan: de app afstemmen op de nieuwe werking
 
-28 nov 2026. Status: **plan, wacht op akkoord**. Er is nog niets gebouwd.
+28 nov 2026. Status: **akkoord gekregen op 28 nov 2026** (alle voorstellen gevolgd: Media = Chiara, voorstel = contract van NextGenSolutions, stil akkoord per klant en standaard uit, rechten getest op de server, volgorde 1 tot 9).
+
+## Voortgang
+
+- **Fase 1: af en live (28 nov 2026).** Yasmine en Jonathan hebben nog geen account; hun profiel en rechten komen vanzelf mee als jullie het account maken met hun sjabloon.
 
 ## Wat ik vond
 

@@ -9190,3 +9190,19 @@ do $$ begin
     alter table public.abm_bedrijven add constraint abm_bedrijven_bedrijf_check check (bedrijf is null or bedrijf in ('nextgenmedia', 'nextgensolutions', 'algemeen'));
   end if;
 end $$;
+
+-- ── Nieuwe werking fase 1 (28 nov 2026): beslissingen per domein ─────────────
+ALTER TABLE ritme_beslissingen ADD COLUMN IF NOT EXISTS domein text;
+ALTER TABLE ritme_beslissingen ADD COLUMN IF NOT EXISTS eigenaar text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ritme_beslissingen_domein_check') THEN
+    ALTER TABLE ritme_beslissingen ADD CONSTRAINT ritme_beslissingen_domein_check
+      CHECK (domein IS NULL OR domein IN ('solutions','media','financien_legal','interne_werking','meerdere'));
+  END IF;
+END $$;
+INSERT INTO app_settings (key, value, updated_at)
+SELECT 'rol_sjablonen_backup_20261128', jsonb_agg(to_jsonb(r)), now() FROM rol_sjablonen r
+ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value, updated_at)
+SELECT 'contentplanning_backup_20261128', value, now() FROM app_settings WHERE key = 'contentplanning'
+ON CONFLICT (key) DO NOTHING;

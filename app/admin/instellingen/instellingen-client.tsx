@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Users, LayoutGrid, Building2, Receipt, Plug, FileImage, ShieldCheck, ScrollText, AlertTriangle, Handshake, UserSquare2, HardDrive, Tags } from 'lucide-react'
+import { Users, LayoutGrid, Building2, Receipt, Plug, FileImage, ShieldCheck, ScrollText, AlertTriangle, Handshake, UserSquare2, HardDrive, Tags, Compass } from 'lucide-react'
 import type { AlleInstellingen, InstellingenSleutel, ModuleInfo, Rol } from '@/lib/instellingen/model'
 import { Laden, Bevestig } from './ui'
 import { SectieMedewerkers } from './sectie-medewerkers'
@@ -18,6 +18,7 @@ import { SectieVerkoop } from './sectie-verkoop'
 import { SectieTeam } from './sectie-team'
 import { SectieOpslag } from './sectie-opslag'
 import { SectieDiensten } from './sectie-diensten'
+import { SectieWerking } from './sectie-werking'
 
 export type Bijgewerkt = Record<string, { op: string; door: string | null }>
 
@@ -41,6 +42,7 @@ export const TABS = [
   { key: 'medewerkers', label: 'Medewerkers', icon: Users },
   { key: 'modules', label: 'Tabbladen en modules', icon: LayoutGrid },
   { key: 'bedrijf', label: 'Bedrijfsgegevens', icon: Building2 },
+  { key: 'werking', label: 'Werking', icon: Compass },
   { key: 'diensten', label: 'Diensten', icon: Tags },
   { key: 'facturatie', label: 'Facturatie-instellingen', icon: Receipt },
   { key: 'verkoop', label: 'Verkoop', icon: Handshake },
@@ -142,6 +144,7 @@ export function InstellingenClient({ tab, verborgen, isAdmin }: { tab: string; v
         {actief === 'modules' && <SectieModules ctx={ctx} />}
         {actief === 'bedrijf' && <SectieBedrijf ctx={ctx} />}
         {actief === 'diensten' && <SectieDiensten />}
+        {actief === 'werking' && <SectieWerking ctx={ctx} />}
         {actief === 'facturatie' && <SectieFacturatie ctx={ctx} />}
         {actief === 'verkoop' && <SectieVerkoop ctx={ctx} />}
         {actief === 'team' && <SectieTeam />}

@@ -26,6 +26,8 @@ export type CpData = {
   instellingen: CpInstellingen; batches: Batch[]; klanten: Klant[]; cpKlanten: CpKlant[]; cycli: Cyclus[]; taken: Taak[]
   notities: Notitie[]; checks: Check[]; faseAanpassingen: Record<string, string[]>; mensen: string[]
   kan: { aanpassen: boolean; beheren: boolean }; ik: string | null
+  /** Planning Media: wie standaard welk werk doet (Instellingen → Werking). */
+  eigenaars?: Record<'management' | 'uitvoering' | 'shoot', string>
   /** Klantenbatches: ✓ (actief) / ✗ per klant, maand en reeks; geen rij = nog niet beslist. */
   bord: BordCel[]
   /** Reeks 3: per klant en (volgende) maand of er een meeting komt. */
